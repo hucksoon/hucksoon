@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>던전 크롤러 — Roguelike</title>
+<style>
+  :root {
+    --bg: #0d0e14;
+    --panel: #16181f;
+    --border: #2a2d3a;
+    --text: #cdd3de;
+    --accent: #ffcf5c;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Courier New", ui-monospace, monospace;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    min-height: 100%;
+  }
+  h1 {
+    font-size: 20px;
+    letter-spacing: 2px;
+    margin: 4px 0;
+    color: var(--accent);
+    text-shadow: 0 0 8px rgba(255, 207, 92, 0.3);
+  }
+  #stats {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    justify-content: center;
+    font-size: 14px;
+    padding: 8px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  #stats b { color: var(--accent); }
+  .hp { color: #ff6b6b; }
+  .gold { color: #ffcf5c; }
+  .lvl { color: #6bd3ff; }
+  #game {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #000;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+    image-rendering: pixelated;
+    max-width: 100%;
+  }
+  #log {
+    width: 640px;
+    max-width: 100%;
+    height: 110px;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  #log div { opacity: 0.85; }
+  #log div:last-child { opacity: 1; color: #fff; }
+  .hint {
+    font-size: 12px;
+    opacity: 0.55;
+    text-align: center;
+    max-width: 640px;
+  }
+  .msg-hit { color: #ff8f6b; }
+  .msg-good { color: #7be08a; }
+  .msg-bad { color: #ff6b6b; }
+  .msg-info { color: #6bd3ff; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>⚔ 던전 크롤러 ⚔</h1>
+  <div id="stats">
+    <span>층 <b id="depth">1</b></span>
+    <span class="hp">HP <b id="hp">--</b></span>
+    <span>공격 <b id="atk">--</b></span>
+    <span class="gold">골드 <b id="gold">0</b></span>
+    <span class="lvl">Lv <b id="plvl">1</b> (<span id="xp">0</span>/<span id="xpn">0</span>)</span>
+  </div>
+  <canvas id="game" width="640" height="480"></canvas>
+  <div id="log"></div>
+  <p class="hint">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 재시작: R<br>
+  계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다.</p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---- 설정 ----
+  const TILE = 20;                 // 타일 픽셀 크기
+  const MAP_W = 32, MAP_H = 24;    // 맵 크기(타일 단위)
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  canvas.width = MAP_W * TILE;
+  canvas.height = MAP_H * TILE;
+
+  // 타일 종류
+  const WALL = 0, FLOOR = 1, STAIRS = 2;
+
+  // ---- 유틸 ----
+  const rnd = (n) => Math.floor(Math.random() * n);
+  const between = (lo, hi) => lo + rnd(hi - lo + 1);
+  const dist = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+  // ---- 게임 상태 ----
+  let map, visible, seen, player, enemies, items, depth, gameOver;
+
+  const ENEMY_TYPES = [
+    { ch: "r", name: "쥐",     color: "#a58b6f", hp: 3,  atk: 1, xp: 2 },
+    { ch: "g", name: "고블린", color: "#7bce6b", hp: 6,  atk: 2, xp: 5 },
+    { ch: "o", name: "오크",   color: "#5fae4e", hp: 10, atk: 3, xp: 9 },
+    { ch: "T", name: "트롤",   color: "#9b7bce", hp: 16, atk: 5, xp: 16 },
+  ];
+
+  // ---- 던전 생성 (방 + 통로) ----
+  function generateDungeon() {
+    map = Array.from({ length: MAP_H }, () => new Array(MAP_W).fill(WALL));
+    visible = Array.from({ length: MAP_H }, () => new Array(MAP_W).fill(false));
+    seen = Array.from({ length: MAP_H }, () => new Array(MAP_W).fill(false));
+
+    const rooms = [];
+    const roomCount = between(6, 9);
+    for (let i = 0; i < roomCount * 3 && rooms.length < roomCount; i++) {
+      const w = between(4, 8), h = between(3, 6);
+      const x = between(1, MAP_W - w - 2), y = between(1, MAP_H - h - 2);
+      const newRoom = { x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1) };
+      if (rooms.some(r => overlaps(r, newRoom))) continue;
+      carveRoom(newRoom);
+      if (rooms.length > 0) {
+        const prev = rooms[rooms.length - 1];
+        carveCorridor(prev.cx, prev.cy, newRoom.cx, newRoom.cy);
+      }
+      rooms.push(newRoom);
+    }
+    return rooms;
+  }
+
+  function overlaps(a, b) {
+    return a.x <= b.x + b.w + 1 && a.x + a.w + 1 >= b.x &&
+           a.y <= b.y + b.h + 1 && a.y + a.h + 1 >= b.y;
+  }
+  function carveRoom(r) {
+    for (let y = r.y; y < r.y + r.h; y++)
+      for (let x = r.x; x < r.x + r.w; x++)
+        map[y][x] = FLOOR;
+  }
+  function carveCorridor(x1, y1, x2, y2) {
+    if (rnd(2)) { hLine(x1, x2, y1); vLine(y1, y2, x2); }
+    else        { vLine(y1, y2, x1); hLine(x1, x2, y2); }
+  }
+  function hLine(x1, x2, y) {
+    for (let x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) map[y][x] = FLOOR;
+  }
+  function vLine(y1, y2, x) {
+    for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) map[y][x] = FLOOR;
+  }
+
+  // ---- 스폰 ----
+  function randomFloor(exclude) {
+    for (let tries = 0; tries < 500; tries++) {
+      const x = rnd(MAP_W), y = rnd(MAP_H);
+      if (map[y][x] !== FLOOR) continue;
+      if (exclude && exclude.some(p => p.x === x && p.y === y)) continue;
+      return { x, y };
+    }
+    return null;
+  }
+
+  function newLevel(rooms) {
+    const start = rooms[0];
+    player.x = start.cx; player.y = start.cy;
+
+    // 계단 배치 (가장 먼 방)
+    let far = rooms[0], best = -1;
+    for (const r of rooms) {
+      const d = dist(r, start);
+      if (d > best) { best = d; far = r; }
+    }
+    map[far.cy][far.cx] = STAIRS;
+
+    // 적 스폰 (층이 깊을수록 강해짐)
+    enemies = [];
+    const count = between(4 + depth, 6 + depth * 2);
+    const maxTier = Math.min(ENEMY_TYPES.length - 1, Math.floor(depth / 2));
+    for (let i = 0; i < count; i++) {
+      const spot = randomFloor([player]);
+      if (!spot) break;
+      const tier = between(0, maxTier);
+      const t = ENEMY_TYPES[tier];
+      enemies.push({ x: spot.x, y: spot.y, ...t, hp: t.hp, maxHp: t.hp });
+    }
+
+    // 아이템 스폰
+    items = [];
+    const potions = between(1, 3);
+    for (let i = 0; i < potions; i++) {
+      const spot = randomFloor([player, ...enemies, ...items]);
+      if (spot) items.push({ x: spot.x, y: spot.y, type: "potion" });
+    }
+    // 가끔 골드 더미
+    const golds = between(2, 4);
+    for (let i = 0; i < golds; i++) {
+      const spot = randomFloor([player, ...enemies, ...items]);
+      if (spot) items.push({ x: spot.x, y: spot.y, type: "gold", amount: between(3, 12) });
+    }
+
+    computeFOV();
+  }
+
+  // ---- 시야(FOV): 간단한 반경 + 라인 오브 사이트 ----
+  function computeFOV() {
+    for (let y = 0; y < MAP_H; y++)
+      for (let x = 0; x < MAP_W; x++) visible[y][x] = false;
+
+    const R = 7;
+    for (let a = 0; a < 360; a += 2) {
+      const rad = a * Math.PI / 180;
+      const dx = Math.cos(rad), dy = Math.sin(rad);
+      let px = player.x + 0.5, py = player.y + 0.5;
+      for (let step = 0; step < R; step++) {
+        const tx = Math.floor(px), ty = Math.floor(py);
+        if (tx < 0 || ty < 0 || tx >= MAP_W || ty >= MAP_H) break;
+        visible[ty][tx] = true;
+        seen[ty][tx] = true;
+        if (map[ty][tx] === WALL) break;
+        px += dx; py += dy;
+      }
+    }
+    visible[player.y][player.x] = true;
+    seen[player.y][player.x] = true;
+  }
+
+  // ---- 로그 ----
+  const logEl = document.getElementById("log");
+  function log(msg, cls) {
+    const d = document.createElement("div");
+    if (cls) d.className = "msg-" + cls;
+    d.textContent = msg;
+    logEl.appendChild(d);
+    while (logEl.children.length > 40) logEl.removeChild(logEl.firstChild);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // ---- 플레이어 액션 ----
+  function tryMove(dx, dy) {
+    if (gameOver) return;
+    const nx = player.x + dx, ny = player.y + dy;
+    if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) return;
+    if (map[ny][nx] === WALL) return;
+
+    const foe = enemies.find(e => e.x === nx && e.y === ny);
+    if (foe) { attack(player, foe); }
+    else {
+      player.x = nx; player.y = ny;
+      pickup();
+      if (map[ny][nx] === STAIRS) { descend(); return; }
+    }
+    endTurn();
+  }
+
+  function wait() {
+    if (gameOver) return;
+    endTurn();
+  }
+
+  function attack(attacker, target) {
+    const dmg = Math.max(1, attacker.atk + rnd(2));
+    target.hp -= dmg;
+    if (attacker === player) {
+      log(`${target.name}에게 ${dmg} 피해!`, "hit");
+      if (target.hp <= 0) killEnemy(target);
+    } else {
+      log(`${attacker.name}에게 ${dmg} 피해를 입음.`, "bad");
+      if (target.hp <= 0) death();
+    }
+  }
+
+  function killEnemy(e) {
+    enemies = enemies.filter(x => x !== e);
+    log(`${e.name} 처치! (+${e.xp} XP)`, "good");
+    gainXp(e.xp);
+  }
+
+  function gainXp(amount) {
+    player.xp += amount;
+    while (player.xp >= player.xpNext) {
+      player.xp -= player.xpNext;
+      player.plvl++;
+      player.xpNext = Math.floor(player.xpNext * 1.5);
+      player.maxHp += 4;
+      player.hp = player.maxHp;
+      player.atk += 1;
+      log(`레벨 업! Lv ${player.plvl} — 최대 HP/공격력 증가, HP 회복!`, "good");
+    }
+  }
+
+  function pickup() {
+    const it = items.find(i => i.x === player.x && i.y === player.y);
+    if (!it) return;
+    items = items.filter(x => x !== it);
+    if (it.type === "potion") {
+      player.potions++;
+      log("포션을 주웠다. (Q로 사용)", "info");
+    } else if (it.type === "gold") {
+      player.gold += it.amount;
+      log(`골드 +${it.amount}`, "info");
+    }
+  }
+
+  function usePotion() {
+    if (gameOver) return;
+    if (player.potions <= 0) { log("포션이 없다.", "bad"); return; }
+    player.potions--;
+    const heal = 8;
+    player.hp = Math.min(player.maxHp, player.hp + heal);
+    log(`포션 사용. HP +${heal}`, "good");
+    endTurn();
+  }
+
+  function descend() {
+    depth++;
+    log(`${depth}층으로 내려간다...`, "info");
+    const rooms = generateDungeon();
+    newLevel(rooms);
+    render();
+    updateStats();
+  }
+
+  function death() {
+    gameOver = true;
+    log(`당신은 ${depth}층에서 쓰러졌다. R을 눌러 재시작.`, "bad");
+  }
+
+  // ---- 적 턴 ----
+  function endTurn() {
+    // 적 이동/공격
+    for (const e of [...enemies]) {
+      if (e.hp <= 0) continue;
+      if (dist(e, player) === 1) {
+        attack(e, player);
+        if (gameOver) break;
+      } else if (visible[e.y][e.x] && dist(e, player) <= 6) {
+        moveToward(e);
+      } else if (rnd(3) === 0) {
+        // 가끔 배회
+        const dirs = [[0,1],[0,-1],[1,0],[-1,0]];
+        const [dx, dy] = dirs[rnd(4)];
+        stepEnemy(e, dx, dy);
+      }
+    }
+    if (!gameOver) computeFOV();
+    render();
+    updateStats();
+  }
+
+  function moveToward(e) {
+    const dx = Math.sign(player.x - e.x);
+    const dy = Math.sign(player.y - e.y);
+    // 더 먼 축을 우선, 막히면 다른 축
+    if (Math.abs(player.x - e.x) >= Math.abs(player.y - e.y)) {
+      if (!stepEnemy(e, dx, 0)) stepEnemy(e, 0, dy);
+    } else {
+      if (!stepEnemy(e, 0, dy)) stepEnemy(e, dx, 0);
+    }
+  }
+
+  function stepEnemy(e, dx, dy) {
+    const nx = e.x + dx, ny = e.y + dy;
+    if (dx === 0 && dy === 0) return false;
+    if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) return false;
+    if (map[ny][nx] === WALL) return false;
+    if (nx === player.x && ny === player.y) return false;
+    if (enemies.some(o => o !== e && o.x === nx && o.y === ny)) return false;
+    e.x = nx; e.y = ny;
+    return true;
+  }
+
+  // ---- 렌더링 ----
+  function render() {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        if (!seen[y][x]) continue;
+        const lit = visible[y][x];
+        const px = x * TILE, py = y * TILE;
+        const t = map[y][x];
+        if (t === WALL) {
+          ctx.fillStyle = lit ? "#3a3f52" : "#1c1f2b";
+          ctx.fillRect(px, py, TILE, TILE);
+        } else {
+          ctx.fillStyle = lit ? "#12131a" : "#0a0b10";
+          ctx.fillRect(px, py, TILE, TILE);
+          // 바닥 점 무늬
+          ctx.fillStyle = lit ? "#22252f" : "#14161e";
+          ctx.fillRect(px + TILE/2 - 1, py + TILE/2 - 1, 2, 2);
+          if (t === STAIRS) drawGlyph(">", px, py, lit ? "#ffcf5c" : "#6b5a2a");
+        }
+      }
+    }
+
+    // 아이템
+    for (const it of items) {
+      if (!visible[it.y][it.x]) continue;
+      const px = it.x * TILE, py = it.y * TILE;
+      if (it.type === "potion") drawGlyph("!", px, py, "#ff6bd3");
+      else drawGlyph("$", px, py, "#ffcf5c");
+    }
+
+    // 적
+    for (const e of enemies) {
+      if (!visible[e.y][e.x]) continue;
+      drawGlyph(e.ch, e.x * TILE, e.y * TILE, e.color);
+    }
+
+    // 플레이어
+    drawGlyph("@", player.x * TILE, player.y * TILE, "#ffffff");
+  }
+
+  function drawGlyph(ch, px, py, color) {
+    ctx.fillStyle = color;
+    ctx.font = `bold ${TILE - 2}px "Courier New", monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(ch, px + TILE / 2, py + TILE / 2 + 1);
+  }
+
+  // ---- HUD ----
+  function updateStats() {
+    document.getElementById("depth").textContent = depth;
+    document.getElementById("hp").textContent = `${Math.max(0, player.hp)}/${player.maxHp}`;
+    document.getElementById("atk").textContent = player.atk;
+    document.getElementById("gold").textContent = player.gold;
+    document.getElementById("plvl").textContent = player.plvl;
+    document.getElementById("xp").textContent = player.xp;
+    document.getElementById("xpn").textContent = player.xpNext;
+  }
+
+  // ---- 초기화 ----
+  function newGame() {
+    depth = 1;
+    gameOver = false;
+    player = {
+      x: 0, y: 0,
+      hp: 20, maxHp: 20,
+      atk: 3,
+      gold: 0,
+      potions: 1,
+      plvl: 1, xp: 0, xpNext: 10,
+    };
+    logEl.innerHTML = "";
+    log("던전에 발을 들였다. 계단(>)을 찾아 더 깊이 내려가라.", "info");
+    const rooms = generateDungeon();
+    newLevel(rooms);
+    render();
+    updateStats();
+  }
+
+  // ---- 입력 ----
+  window.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    let handled = true;
+    switch (k) {
+      case "arrowup": case "w":    tryMove(0, -1); break;
+      case "arrowdown": case "s":  tryMove(0, 1); break;
+      case "arrowleft": case "a":  tryMove(-1, 0); break;
+      case "arrowright": case "d": tryMove(1, 0); break;
+      case " ":                    wait(); break;
+      case "q":                    usePotion(); break;
+      case "r":                    newGame(); break;
+      default: handled = false;
+    }
+    if (handled) e.preventDefault();
+  });
+
+  newGame();
+})();
+</script>
+</body>
+</html>
