@@ -105,7 +105,7 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: #1a1406; font-weight: bold; }
   button.primary:hover:not(:disabled) { color: #1a1406; filter: brightness(1.08); }
 
-  #login-modal {
+  .overlay {
     position: fixed;
     inset: 0;
     display: flex;
@@ -114,7 +114,7 @@
     padding: 16px;
     background: rgba(0, 0, 0, 0.7);
   }
-  #login-modal[hidden] { display: none; }
+  .overlay[hidden] { display: none; }
   .modal {
     width: 360px;
     max-width: 100%;
@@ -148,6 +148,36 @@
   #login-msg.err { color: #ff6b6b; }
   #login-msg.ok { color: #7be08a; }
   #login-close { width: 100%; margin-top: 10px; }
+
+  /* ---- 인벤토리 ---- */
+  .modal.inv { width: 680px; max-height: calc(100vh - 32px); overflow-y: auto; }
+  .inv-head { display: flex; align-items: baseline; justify-content: space-between; }
+  #inv-count { font-size: 12px; opacity: 0.7; }
+  .inv-top { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; }
+  @media (max-width: 560px) { .inv-top { grid-template-columns: 1fr; } }
+  .equip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .slot {
+    text-align: left;
+    padding: 6px 8px;
+    min-height: 44px;
+    font-size: 12px;
+    line-height: 1.35;
+    overflow: hidden;
+  }
+  .slot small { display: block; opacity: 0.55; font-size: 11px; }
+  .slot.empty { opacity: 0.6; }
+  .slot.sel, .bag-item.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .summary { font-size: 12px; line-height: 1.6; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  .summary h3, .detail h3 { margin: 0 0 4px; font-size: 13px; }
+  .summary .off { opacity: 0.4; }
+  .bag { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; max-height: 210px; overflow-y: auto; padding: 2px; }
+  .bag-item { text-align: left; font-size: 12px; padding: 6px 8px; }
+  .bag-item small { opacity: 0.55; }
+  .bag-empty { font-size: 12px; opacity: 0.6; padding: 8px 2px; }
+  .detail { margin-top: 10px; min-height: 60px; font-size: 12px; line-height: 1.6; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  .detail .meta { opacity: 0.6; }
+  .detail .row { margin-top: 8px; }
+  #inv-close { width: 100%; margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -156,21 +186,39 @@
   <div id="account">
     <span id="account-status"></span>
     <button id="account-btn" type="button"></button>
+    <button id="inv-btn" type="button">인벤토리 (I)</button>
   </div>
   <div id="stats">
     <span>층 <b id="depth">1</b> (최고 <span id="best">0</span>)</span>
     <span class="hp">HP <b id="hp">--</b></span>
     <span>공격 <b id="atk">--</b></span>
+    <span>방어 <b id="def">0</b></span>
     <span class="gold">골드 <b id="gold">0</b></span>
     <span class="lvl">Lv <b id="plvl">1</b> (<span id="xp">0</span>/<span id="xpn">0</span>)</span>
   </div>
   <canvas id="game" width="640" height="480"></canvas>
   <div id="log"></div>
-  <p class="hint">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 재시작: R<br>
-  계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다.</p>
+  <p class="hint">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 인벤토리: I &nbsp;·&nbsp; 재시작: R<br>
+  계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다. 쓰러진 적이 장비(<b>)</b> 무기, <b>[</b> 방어구)를 떨어뜨리기도 해요.</p>
 </div>
 
-<div id="login-modal" hidden>
+<div id="inv-modal" class="overlay" hidden>
+  <div class="modal inv" role="dialog" aria-modal="true" aria-labelledby="inv-title">
+    <div class="inv-head">
+      <h2 id="inv-title">인벤토리</h2>
+      <span id="inv-count"></span>
+    </div>
+    <div class="inv-top">
+      <div id="inv-equip" class="equip-grid"></div>
+      <div id="inv-summary" class="summary"></div>
+    </div>
+    <div id="inv-bag" class="bag"></div>
+    <div id="inv-detail" class="detail"></div>
+    <button id="inv-close" type="button">닫기 (I)</button>
+  </div>
+</div>
+
+<div id="login-modal" class="overlay" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
     <h2 id="login-title">계정 연결</h2>
     <p class="sub">받은 인증 코드를 입력하면 어느 기기에서든 진행 상황을 이어서 플레이할 수 있어요. 지금 게스트 진행 상황은 계정으로 옮겨져요.</p>
@@ -196,6 +244,7 @@
   </div>
 </div>
 
+<script src="items.js"></script>
 <script>
 (() => {
   "use strict";
@@ -378,9 +427,119 @@
     };
   })();
 
+  // ---- 인벤토리 / 장비 ----
+  // 계정(로그인) 또는 게스트(기기 ID)마다 따로 저장. 서버 저장이 생기기 전까지는 이 브라우저에만 있음.
+  // 장비는 죽어도 사라지지 않음. 얻거나 버린 기록은 전부 log에 남김 (시드로 서버에서 다시 계산해 검증 가능)
+  const BAG_SIZE = 48;
+  const Inv = (() => {
+    let owner = null;
+    let data = null;  // { bag: [item], equip: { slot: item|null }, log: [entry] }
+    const key = (o) => `rl_inv:${o}`;
+    const empty = () => ({ bag: [], equip: Object.fromEntries(RLItems.SLOTS.map(s => [s, null])), log: [] });
+
+    function read(o) {
+      try {
+        const d = JSON.parse(store.get(key(o)));
+        if (d && Array.isArray(d.bag) && d.equip && Array.isArray(d.log)) return d;
+      } catch {}
+      return empty();
+    }
+    const write = () => store.set(key(owner), JSON.stringify(data));
+    const all = () => [...data.bag, ...Object.values(data.equip).filter(Boolean)];
+
+    function record(ev, item, extra = {}) {
+      data.log.push({
+        t: new Date().toISOString(), ev, owner,
+        id: item.id, seed: item.seed, src: item.src, lvl: item.lvl, v: item.v,
+        rarity: item.rarity, slot: item.slot, ...extra,
+      });
+    }
+
+    return {
+      use(o) { owner = o; data = read(o); },
+      bag: () => data.bag,
+      equipped: () => data.equip,
+      log: () => data.log,
+      full: () => data.bag.length >= BAG_SIZE,
+      totals: () => RLItems.totals(Object.values(data.equip)),
+
+      // "ok" | "full" | "dup" (같은 시드로 이미 얻은 아이템)
+      add(item, extra) {
+        if (all().some(x => x.id === item.id)) return "dup";
+        if (data.bag.length >= BAG_SIZE) return "full";
+        data.bag.push(item);
+        record("get", item, extra);
+        write();
+        return "ok";
+      },
+      equip(id) {
+        const i = data.bag.findIndex(x => x.id === id);
+        if (i < 0) return;
+        const item = data.bag.splice(i, 1)[0];
+        const prev = data.equip[item.slot];
+        data.equip[item.slot] = item;
+        if (prev) data.bag.push(prev);
+        write();
+      },
+      unequip(slot) {
+        const item = data.equip[slot];
+        if (!item || data.bag.length >= BAG_SIZE) return false;
+        data.equip[slot] = null;
+        data.bag.push(item);
+        write();
+        return true;
+      },
+      discard(id) {
+        const i = data.bag.findIndex(x => x.id === id);
+        if (i < 0) return;
+        const item = data.bag.splice(i, 1)[0];
+        record("discard", item);
+        write();
+      },
+      // 게스트로 모은 장비와 기록을 지금 소유자(계정)로 옮김. 빈 칸이면 장착 상태도 유지
+      mergeFrom(other) {
+        if (other === owner) return 0;
+        const src = read(other);
+        let moved = 0;
+        const take = (item, wasEquipped) => {
+          if (all().some(x => x.id === item.id)) return;
+          if (wasEquipped && !data.equip[item.slot]) data.equip[item.slot] = item;
+          else data.bag.push(item);
+          record("migrate", item, { from: other });
+          moved++;
+        };
+        src.bag.forEach(item => take(item, false));
+        Object.values(src.equip).filter(Boolean).forEach(item => take(item, true));
+        data.log.push(...src.log);
+        write();
+        store.del(key(other));
+        return moved;
+      },
+    };
+  })();
+
   // ---- 게임 상태 ----
   let map, visible, seen, player, enemies, items, depth, gameOver;
   let bestDepth = 0;
+
+  const newRunId = () => randomId().replace(/-/g, "").slice(0, 12);
+  const rarityColor = (item) => RLItems.RARITIES[item.rarity].color;
+
+  // 레벨로 오르는 기본 능력치(player) + 장비·세트 효과
+  function stats() {
+    const g = Inv.totals().stats;
+    return {
+      maxHp: player.maxHp + g.hp,
+      atk: player.atk + g.atk,
+      def: g.def,
+      crit: Math.min(75, g.crit),
+      lifesteal: g.lifesteal,
+      gold: g.gold,
+      xp: g.xp,
+      killHeal: g.killHeal,
+    };
+  }
+  const heal = (n) => { player.hp = Math.min(stats().maxHp, player.hp + n); };
 
   const ENEMY_TYPES = [
     { ch: "r", name: "쥐",     color: "#a58b6f", hp: 3,  atk: 1, xp: 2 },
@@ -509,9 +668,10 @@
 
   // ---- 로그 ----
   const logEl = document.getElementById("log");
-  function log(msg, cls) {
+  function log(msg, cls, color) {
     const d = document.createElement("div");
     if (cls) d.className = "msg-" + cls;
+    if (color) d.style.color = color;
     d.textContent = msg;
     logEl.appendChild(d);
     while (logEl.children.length > 40) logEl.removeChild(logEl.firstChild);
@@ -541,12 +701,18 @@
   }
 
   function attack(attacker, target) {
-    const dmg = Math.max(1, attacker.atk + rnd(2));
-    target.hp -= dmg;
     if (attacker === player) {
-      log(`${target.name}에게 ${dmg} 피해!`, "hit");
+      const s = stats();
+      const crit = Math.random() * 100 < s.crit;
+      const dmg = (s.atk + rnd(2)) * (crit ? 2 : 1);
+      target.hp -= dmg;
+      log(`${target.name}에게 ${dmg} 피해!${crit ? " (치명타)" : ""}`, "hit");
+      const drain = Math.floor(dmg * s.lifesteal / 100);
+      if (drain > 0) heal(drain);
       if (target.hp <= 0) killEnemy(target);
     } else {
+      const dmg = Math.max(1, attacker.atk + rnd(2) - stats().def);
+      target.hp -= dmg;
       log(`${attacker.name}에게 ${dmg} 피해를 입음.`, "bad");
       if (target.hp <= 0) death();
     }
@@ -554,8 +720,21 @@
 
   function killEnemy(e) {
     enemies = enemies.filter(x => x !== e);
-    log(`${e.name} 처치! (+${e.xp} XP)`, "good");
-    gainXp(e.xp);
+    const s = stats();
+    const xp = Math.round(e.xp * (1 + s.xp / 100));
+    log(`${e.name} 처치! (+${xp} XP)`, "good");
+    if (s.killHeal) heal(s.killHeal);
+    dropLoot(e);
+    gainXp(xp);
+  }
+
+  // 드롭 여부와 아이템은 (판 ID, 층, 처치 순번) 시드로 정해짐 → 같은 기록이면 서버에서 똑같이 다시 계산됨
+  function dropLoot(e) {
+    const seed = `${player.rid}|d${depth}|k${player.kills++}`;
+    const item = RLItems.rollDrop(seed, depth);
+    if (!item) return;
+    items.push({ x: e.x, y: e.y, type: "gear", item });
+    log(`${e.name}이(가) ${RLItems.itemName(item)}을(를) 떨어뜨렸다!`, null, rarityColor(item));
   }
 
   function gainXp(amount) {
@@ -565,22 +744,27 @@
       player.plvl++;
       player.xpNext = Math.floor(player.xpNext * 1.5);
       player.maxHp += 4;
-      player.hp = player.maxHp;
       player.atk += 1;
+      player.hp = stats().maxHp;
       log(`레벨 업! Lv ${player.plvl} — 최대 HP/공격력 증가, HP 회복!`, "good");
     }
   }
 
   function pickup() {
-    const it = items.find(i => i.x === player.x && i.y === player.y);
-    if (!it) return;
-    items = items.filter(x => x !== it);
-    if (it.type === "potion") {
-      player.potions++;
-      log("포션을 주웠다. (Q로 사용)", "info");
-    } else if (it.type === "gold") {
-      player.gold += it.amount;
-      log(`골드 +${it.amount}`, "info");
+    for (const it of items.filter(i => i.x === player.x && i.y === player.y)) {
+      if (it.type === "gear") {
+        const result = Inv.add(it.item, { depth });
+        if (result === "full") { log("가방이 가득 찼다. 인벤토리(I)에서 정리해 주세요.", "bad"); continue; }
+        if (result === "ok") log(`${RLItems.itemName(it.item)}을(를) 주웠다.`, null, rarityColor(it.item));
+      } else if (it.type === "potion") {
+        player.potions++;
+        log("포션을 주웠다. (Q로 사용)", "info");
+      } else if (it.type === "gold") {
+        const amount = Math.round(it.amount * (1 + stats().gold / 100));
+        player.gold += amount;
+        log(`골드 +${amount}`, "info");
+      }
+      items = items.filter(x => x !== it);
     }
   }
 
@@ -588,9 +772,8 @@
     if (gameOver) return;
     if (player.potions <= 0) { log("포션이 없다.", "bad"); return; }
     player.potions--;
-    const heal = 8;
-    player.hp = Math.min(player.maxHp, player.hp + heal);
-    log(`포션 사용. HP +${heal}`, "good");
+    heal(8);
+    log("포션 사용. HP +8", "good");
     endTurn();
   }
 
@@ -620,6 +803,7 @@
       run: gameOver ? null : {
         d: depth, hp: player.hp, mh: player.maxHp, a: player.atk, g: player.gold,
         p: player.potions, l: player.plvl, x: player.xp, xn: player.xpNext,
+        rid: player.rid, k: player.kills,
       },
     };
   }
@@ -669,7 +853,9 @@
       gold: r.g,
       potions: r.p,
       plvl: r.l, xp: r.x, xpNext: r.xn,
+      rid: r.rid || newRunId(), kills: r.k || 0,
     };
+    player.hp = Math.min(player.hp, stats().maxHp);
     logEl.innerHTML = "";
     log(`${depth}층에서 이어서 시작한다.`, "info");
     const rooms = generateDungeon();
@@ -775,6 +961,7 @@
       if (!visible[it.y][it.x]) continue;
       const px = it.x * TILE, py = it.y * TILE;
       if (it.type === "potion") drawGlyph("!", px, py, "#ff6bd3");
+      else if (it.type === "gear") drawGlyph(it.item.slot === "weapon" ? ")" : "[", px, py, rarityColor(it.item));
       else drawGlyph("$", px, py, "#ffcf5c");
     }
 
@@ -799,8 +986,10 @@
   // ---- HUD ----
   function updateStats() {
     document.getElementById("depth").textContent = depth;
-    document.getElementById("hp").textContent = `${Math.max(0, player.hp)}/${player.maxHp}`;
-    document.getElementById("atk").textContent = player.atk;
+    const s = stats();
+    document.getElementById("hp").textContent = `${Math.max(0, player.hp)}/${s.maxHp}`;
+    document.getElementById("atk").textContent = s.atk;
+    document.getElementById("def").textContent = s.def;
     document.getElementById("gold").textContent = player.gold;
     document.getElementById("plvl").textContent = player.plvl;
     document.getElementById("xp").textContent = player.xp;
@@ -819,7 +1008,9 @@
       gold: 0,
       potions: 1,
       plvl: 1, xp: 0, xpNext: 10,
+      rid: newRunId(), kills: 0,
     };
+    player.hp = stats().maxHp;  // 장비로 늘어난 최대 HP까지 채우고 시작
     logEl.innerHTML = "";
     log("던전에 발을 들였다. 계단(>)을 찾아 더 깊이 내려가라.", "info");
     const rooms = generateDungeon();
@@ -934,6 +1125,10 @@
         await Account.confirmCode(loginKind, loginValue, codeInput.value.trim(), operationId);
         closeLogin();
         renderAccount();
+        const guestOwner = inventoryOwner(false);
+        Inv.use(inventoryOwner());
+        const moved = Inv.mergeFrom(guestOwner);
+        if (moved) log(`게스트 장비 ${moved}개를 계정으로 옮겼다.`, "good");
         await syncAfterLogin();
       } catch (err) {
         // 코드는 1회용이라 실패하면 새 코드를 받아야 할 수 있음
@@ -955,6 +1150,7 @@
     Account.logout();
     cloudReady = false;
     store.del(SAVE_KEY);
+    Inv.use(inventoryOwner());
     bestDepth = 0;
     newGame();
     log("로그아웃했다. 게스트로 새로 시작한다.", "info");
@@ -966,12 +1162,157 @@
     if (document.visibilityState === "hidden" && cloudTimer) flushCloud(true);
   });
 
+  // ---- 인벤토리 UI ----
+  // 로그인 중이면 계정 ID(sub), 아니면 이 기기의 게스트 ID
+  function inventoryOwner(loggedIn = Account.loggedIn()) {
+    return loggedIn ? `u:${Account.claims()?.sub || "unknown"}` : `g:${Account.deviceId()}`;
+  }
+
+  const invModal = document.getElementById("inv-modal");
+  const invEquip = document.getElementById("inv-equip");
+  const invSummary = document.getElementById("inv-summary");
+  const invBag = document.getElementById("inv-bag");
+  const invDetail = document.getElementById("inv-detail");
+  const RARITY_ORDER = ["set", "legendary", "epic", "rare", "uncommon", "common"];
+  let selected = null;  // { from: "bag", id } | { from: "equip", slot }
+
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === "style") Object.assign(node.style, v);
+      else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+      else node[k] = v;
+    }
+    for (const c of children.flat()) if (c != null) node.append(c);
+    return node;
+  }
+
+  const itemLabel = (item) => el("span", { style: { color: rarityColor(item) } }, RLItems.itemName(item));
+
+  function selectedItem() {
+    if (!selected) return null;
+    if (selected.from === "equip") return Inv.equipped()[selected.slot];
+    return Inv.bag().find(x => x.id === selected.id) || null;
+  }
+
+  function renderInventory() {
+    const equip = Inv.equipped();
+    document.getElementById("inv-count").textContent = `가방 ${Inv.bag().length}/${BAG_SIZE}`;
+
+    invEquip.replaceChildren(...RLItems.SLOTS.map(slot => {
+      const item = equip[slot];
+      const sel = selected?.from === "equip" && selected.slot === slot;
+      return el("button", {
+        type: "button",
+        className: `slot${item ? "" : " empty"}${sel ? " sel" : ""}`,
+        onclick: () => { selected = item ? { from: "equip", slot } : null; renderInventory(); },
+      }, el("small", {}, RLItems.SLOT_NAMES[slot]), item ? itemLabel(item) : "비어 있음");
+    }));
+
+    // 능력치 합계와 세트 효과
+    const { stats: g, sets } = Inv.totals();
+    const s = stats();
+    const statRows = [
+      `공격력 ${s.atk} (장비 +${g.atk})`, `방어력 ${s.def}`, `최대 HP ${s.maxHp} (장비 +${g.hp})`,
+      `치명타 ${s.crit}% · 흡혈 ${s.lifesteal}%`, `골드 +${s.gold}% · 경험치 +${s.xp}%`,
+    ];
+    invSummary.replaceChildren(
+      el("h3", {}, "능력치"), ...statRows.map(t => el("div", {}, t)),
+      ...sets.map(set => el("div", { style: { marginTop: "6px" } },
+        el("h3", { style: { color: RLItems.RARITIES.set.color } }, `${set.name} (${set.count}/6)`),
+        ...set.bonuses.map(b => el("div", { className: b.on ? "" : "off" }, `${b.count}세트: ${b.text}`)))),
+    );
+
+    const bag = Inv.bag().slice().sort((a, b) =>
+      RARITY_ORDER.indexOf(a.rarity) - RARITY_ORDER.indexOf(b.rarity) || b.lvl - a.lvl);
+    invBag.replaceChildren(...(bag.length ? bag.map(item => el("button", {
+      type: "button",
+      className: `bag-item${selected?.from === "bag" && selected.id === item.id ? " sel" : ""}`,
+      onclick: () => { selected = { from: "bag", id: item.id }; renderInventory(); },
+    }, itemLabel(item), el("small", {}, ` · ${RLItems.SLOT_NAMES[item.slot]} Lv${item.lvl}`)))
+      : [el("div", { className: "bag-empty" }, "가방이 비어 있어요. 던전에서 몬스터를 쓰러뜨리면 장비를 얻을 수 있어요.")]));
+
+    renderDetail();
+  }
+
+  function renderDetail() {
+    const item = selectedItem();
+    if (!item) { invDetail.replaceChildren(el("span", { className: "meta" }, "아이템을 선택하면 자세한 정보가 보여요.")); return; }
+    const kind = item.type ? RLItems.WEAPONS[item.type].name : RLItems.SLOT_NAMES[item.slot];
+    const rows = [
+      el("h3", { style: { color: rarityColor(item) } }, RLItems.itemName(item)),
+      el("div", { className: "meta" }, `${RLItems.RARITIES[item.rarity].name} · ${kind} · Lv${item.lvl}`),
+      ...Object.entries(item.base).map(([k, v]) => el("div", {}, RLItems.formatStat(k, v))),
+      ...item.lines.map(([k, v]) => el("div", { style: { color: rarityColor(item) } }, `◆ ${RLItems.formatStat(k, v)}`)),
+    ];
+    if (item.set) rows.push(el("div", { className: "meta" }, `${RLItems.SETS[item.set].name}: 2·4·6개를 입으면 효과가 켜져요.`));
+
+    const actions = el("div", { className: "row" });
+    if (selected.from === "bag") {
+      const current = Inv.equipped()[item.slot];
+      if (current) rows.push(el("div", { className: "meta" }, "장착 중: ", itemLabel(current)));
+      actions.append(
+        el("button", { type: "button", className: "primary", onclick: () => equipItem(item) }, "장착"),
+        el("button", { type: "button", onclick: () => discardItem(item) }, "버리기"),
+      );
+    } else {
+      actions.append(el("button", { type: "button", onclick: () => unequipSlot(item.slot) }, "해제"));
+    }
+    invDetail.replaceChildren(...rows, actions);
+  }
+
+  // 장비가 바뀌면 최대 HP를 넘는 HP를 잘라내고 화면과 저장을 갱신
+  function afterGearChange() {
+    player.hp = Math.min(player.hp, stats().maxHp);
+    updateStats();
+    saveGame();
+    renderInventory();
+  }
+
+  function equipItem(item) {
+    Inv.equip(item.id);
+    selected = { from: "equip", slot: item.slot };
+    afterGearChange();
+  }
+
+  function unequipSlot(slot) {
+    if (!Inv.unequip(slot)) { invDetail.prepend(el("div", { className: "msg-bad" }, "가방이 가득 차서 해제할 수 없어요.")); return; }
+    selected = null;
+    afterGearChange();
+  }
+
+  function discardItem(item) {
+    const rank = RARITY_ORDER.indexOf(item.rarity);
+    if (rank <= RARITY_ORDER.indexOf("rare") && !confirm(`${RLItems.itemName(item)}을(를) 버릴까요? 되돌릴 수 없어요.`)) return;
+    Inv.discard(item.id);
+    selected = null;
+    afterGearChange();
+  }
+
+  function openInventory() {
+    selected = null;
+    invModal.hidden = false;
+    renderInventory();
+    document.getElementById("inv-close").focus();
+  }
+  function closeInventory() { invModal.hidden = true; }
+
+  document.getElementById("inv-btn").addEventListener("click", (e) => { e.currentTarget.blur(); openInventory(); });
+  document.getElementById("inv-close").addEventListener("click", closeInventory);
+  invModal.addEventListener("click", (e) => { if (e.target === invModal) closeInventory(); });
+
   // ---- 입력 ----
   window.addEventListener("keydown", (e) => {
+    // 인벤토리 안의 버튼이 다시 그려지면 포커스가 사라지므로 닫기 키는 여기서 처리
+    if (!invModal.hidden) {
+      if (e.key === "Escape" || e.key.toLowerCase() === "i") { e.preventDefault(); closeInventory(); }
+      return;
+    }
     if (!modal.hidden || e.target instanceof HTMLInputElement) return;
     const k = e.key.toLowerCase();
     let handled = true;
     switch (k) {
+      case "i":                    openInventory(); break;
       case "arrowup": case "w":    tryMove(0, -1); break;
       case "arrowdown": case "s":  tryMove(0, 1); break;
       case "arrowleft": case "a":  tryMove(-1, 0); break;
@@ -985,6 +1326,7 @@
   });
 
   // ---- 시작 ----
+  Inv.use(inventoryOwner());
   startFromSave(parseSave(store.get(SAVE_KEY)));
   renderAccount();
   if (Account.configured() && Account.loggedIn()) syncAfterLogin();
