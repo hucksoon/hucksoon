@@ -35,8 +35,8 @@ const GROUPS = [
 // 1캐시 = $0.10. 패키지로만 팔기 때문에 캐시 자체는 상점에 노출하지 않음
 const CURRENCY = {
   sku: CASH,
-  name: { en: "Cash", ko: "캐시" },
-  description: { en: "Premium currency for equipment boxes.", ko: "장비 상자를 살 때 쓰는 캐시예요." },
+  name: { en: "Cash", ko: "캐시", ja: "キャッシュ" },
+  description: { en: "Premium currency for equipment boxes.", ko: "장비 상자를 살 때 쓰는 캐시예요.", ja: "装備ボックスの購入に使うキャッシュです。" },
   prices: USD(0.1),
   is_enabled: true,
   is_show_in_store: false,
@@ -44,8 +44,8 @@ const CURRENCY = {
 
 const PACKAGES = [10, 50, 100, 200].map((qty, i) => ({
   sku: `cash_${qty}`,
-  name: { en: `${qty} Cash`, ko: `캐시 ${qty}개` },
-  description: { en: `${qty} Cash for equipment boxes.`, ko: `장비 상자에 쓸 캐시 ${qty}개예요.` },  // API상 필수
+  name: { en: `${qty} Cash`, ko: `캐시 ${qty}개`, ja: `キャッシュ ${qty}` },
+  description: { en: `${qty} Cash for equipment boxes.`, ko: `장비 상자에 쓸 캐시 ${qty}개예요.`, ja: `装備ボックスに使えるキャッシュ ${qty}です。` },  // API상 필수
   groups: ["cash_packs"],
   prices: USD(qty / 10),
   content: [{ sku: CASH, quantity: qty }],
@@ -57,10 +57,11 @@ const PACKAGES = [10, 50, 100, 200].map((qty, i) => ({
 // 1회 뽑기 = 10캐시, 묶음 할인 없음. 결과는 게임 안에서 주문번호를 시드로 결정
 const BOXES = [1, 10, 50].map((draws, i) => ({
   sku: `box_equipment_${draws}`,
-  name: { en: `Equipment Box x${draws}`, ko: `장비 상자 ${draws}회 뽑기` },
+  name: { en: `Equipment Box x${draws}`, ko: `장비 상자 ${draws}회 뽑기`, ja: `装備ボックス ${draws}回` },
   description: {
     en: `${draws} random weapon or armor piece(s).`,
     ko: `무기 또는 방어구 ${draws}개가 무작위로 나와요.`,
+    ja: `武器または防具が${draws}個ランダムで出ます。`,
   },
   groups: ["equipment_boxes"],
   virtual_item_type: "consumable",
@@ -136,14 +137,21 @@ async function ensure(label, isPresent, create) {
 const priceKey = (prices) =>
   (prices || []).map((p) => `${p.currency}:${Number(p.amount)}:${p.country_iso || ""}:${!!p.is_default}`).sort().join(",");
 
-async function ensurePriced(label, url, createUrl, def) {
+// 이름/설명의 언어별 문구가 정의와 같은지 (Admin API는 "en" 또는 "en-US" 형태로 돌려줄 수 있음)
+const textKey = (obj) => Object.entries(obj || {})
+  .map(([k, v]) => [k.slice(0, 2), v]).filter(([, v]) => v).sort().map(([k, v]) => `${k}=${v}`).join("|");
+const sameText = (data, def) => textKey(data.name) === textKey(def.name) && textKey(data.description) === textKey(def.description);
+
+async function ensurePriced(label, url, createUrl, def, priceField = "prices") {
   const { status, data } = await api("GET", url);
   if (status !== 200) return ensure(label, async () => false, () => api("POST", createUrl, def));
-  if (priceKey(data.prices) === priceKey(def.prices)) { console.log(`  = ${label} (이미 있음)`); return; }
-  if (!APPLY) { console.log(`  ~ ${label} (가격 갱신 예정)`); return; }
+  const samePrice = priceKey(data[priceField]) === priceKey(def[priceField]);
+  if (samePrice && sameText(data, def)) { console.log(`  = ${label} (이미 있음)`); return; }
+  const what = [!samePrice && "가격", !sameText(data, def) && "이름/설명"].filter(Boolean).join(", ");
+  if (!APPLY) { console.log(`  ~ ${label} (${what} 갱신 예정)`); return; }
   const res = await api("PUT", url, def);
-  if (res.status >= 200 && res.status < 300) console.log(`  ✓ ${label} 가격 갱신됨`);
-  else { console.log(`  ✗ ${label} 가격 갱신 실패 (${res.status})`, JSON.stringify(res.data)); process.exitCode = 1; }
+  if (res.status >= 200 && res.status < 300) console.log(`  ✓ ${label} ${what} 갱신됨`);
+  else { console.log(`  ✗ ${label} ${what} 갱신 실패 (${res.status})`, JSON.stringify(res.data)); process.exitCode = 1; }
 }
 
 // ---- 실행 ----
@@ -166,8 +174,8 @@ for (const p of PACKAGES)
 
 console.log("장비 상자");
 for (const b of BOXES)
-  await ensure(`${b.sku}  ${b.vc_prices[0].amount}캐시`, () => exists(`${V2}/items/virtual_items/sku/${b.sku}`),
-    () => api("POST", `${V2}/items/virtual_items`, b));
+  await ensurePriced(`${b.sku}  ${b.vc_prices[0].amount}캐시`, `${V2}/items/virtual_items/sku/${b.sku}`,
+    `${V2}/items/virtual_items`, b, "vc_prices");
 
 console.log("보너스 프로모션");
 const listPromos = async () => {

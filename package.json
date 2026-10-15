@@ -1,0 +1,11 @@
+{
+  "name": "dungeon-crawler",
+  "private": true,
+  "description": "던전 크롤러 — 브라우저 로그라이크",
+  "scripts": {
+    "vendor": "mkdir -p vendor/pay-station-sdk && cp node_modules/@xsolla/pay-station-sdk/dist/main.js node_modules/@xsolla/pay-station-sdk/dist/main.js.LICENSE.txt node_modules/@xsolla/pay-station-sdk/dist/style.css vendor/pay-station-sdk/"
+  },
+  "dependencies": {
+    "@xsolla/pay-station-sdk": "^1.1.0"
+  }
+}
