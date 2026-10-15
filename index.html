@@ -95,13 +95,20 @@
     .keys-only { display: none; }
   }
   #touch-pad button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  /* ▲는 ◀보다 오른쪽으로, ▼는 ▶보다 왼쪽으로 어긋나게 해서 헷갈리지 않게 (약 5mm) */
+  #touch-pad { --dpad-shift: 19px; }
   .dpad { display: flex; flex-direction: column; gap: 8px; flex: none; }
+  .dpad-left { align-items: flex-start; }
+  .dpad-right { align-items: flex-end; }
+  .dpad-left .up { margin-left: var(--dpad-shift); }
+  .dpad-right .down { margin-right: var(--dpad-shift); }
   .dpad button { width: 68px; height: 68px; font-size: 24px; padding: 0; }
   .dpad button:active, .dpad button.held { background: var(--border); color: var(--accent); }
   .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; flex: 1; max-width: 260px; }
   .actions button { padding: 12px 4px; font-size: 14px; white-space: nowrap; }
   /* 폭이 좁은 휴대폰(iPhone SE 등): 버튼을 조금 줄여 글자가 한 줄에 들어가게 */
   @media (max-width: 360px) {
+    #touch-pad { --dpad-shift: 10px; }
     .dpad button { width: 62px; height: 62px; }
     .actions button { font-size: 12px; padding: 12px 2px; }
   }
