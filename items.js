@@ -190,15 +190,26 @@
 
   // ---- 상점 ----
   // 5층마다 계단 방에 열림. 황금 고블린과 같은 등급표(레어 이상)로 6개를 진열, 골드로 구매
-  const SHOP = { every: 5, slots: 6, table: "golden", prices: { rare: 60, epic: 150, legendary: 400, set: 300 } };
+  // 진열 바꾸기: 상점마다 최대 3번, 비용은 바꿀 때마다 2배이고 층마다 25%씩 비싸짐
+  const SHOP = {
+    every: 5, slots: 6, table: "golden",
+    prices: { rare: 60, epic: 150, legendary: 400, set: 300 },
+    rerolls: { max: 3, costs: [40, 80, 160], perFloor: 0.25 },
+  };
 
-  // 진열품은 (판 ID, 층, 칸 번호) 시드로 정해짐
-  function shopStock(runId, depth) {
-    return Array.from({ length: SHOP.slots }, (_, i) => generate(`${runId}|shop|d${depth}|s${i}`, SHOP.table, depth));
+  // 진열품은 (판 ID, 층, 진열 바꾼 횟수, 칸 번호) 시드로 정해짐. 처음 진열(0번)은 바꾼 횟수 없이 씀
+  function shopStock(runId, depth, reroll = 0) {
+    const r = reroll ? `|r${reroll}` : "";
+    return Array.from({ length: SHOP.slots }, (_, i) => generate(`${runId}|shop|d${depth}${r}|s${i}`, SHOP.table, depth));
   }
 
-  // 가격: 등급 기본값 × (1 + 아이템 레벨당 10%), 5골드 단위
-  const shopPrice = (item) => Math.round(SHOP.prices[item.rarity] * (1 + (item.lvl - 1) * 0.1) / 5) * 5;
+  // 레벨(층)에 따른 보정: × (1 + 레벨당 10%), 5골드 단위
+  const levelPrice = (base, lvl) => Math.round(base * (1 + (lvl - 1) * 0.1) / 5) * 5;
+  const shopPrice = (item) => levelPrice(SHOP.prices[item.rarity], item.lvl);
+  // n번째(0부터) 진열 바꾸기 비용: 기본값 × (1 + 0.25 × (층 − 1)), 5골드 단위. 더 바꿀 수 없으면 null
+  const rerollCost = (depth, n) => (n < SHOP.rerolls.max
+    ? Math.round(SHOP.rerolls.costs[n] * (1 + SHOP.rerolls.perFloor * (depth - 1)) / 5) * 5
+    : null);
 
   // ---- 표시 ----
   function itemName(item) {
@@ -237,7 +248,7 @@
     RULES_VERSION, SLOTS, SLOT_NAMES, WEAPONS, ARMOR, RARITIES, TABLES, DROPS, DROP_CHANCE, STATS, SETS,
     SELL_STONES, ENHANCE, SHOP,
     rngFrom, generate, rollDrop, itemName, formatStat, totals,
-    enhanceCost, enhanceChance, rollEnhance, enhancedBase, shopStock, shopPrice,
+    enhanceCost, enhanceChance, rollEnhance, enhancedBase, shopStock, shopPrice, rerollCost,
   };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.RLItems = api;

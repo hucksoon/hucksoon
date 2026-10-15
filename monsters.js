@@ -103,6 +103,9 @@
 
   const isBossFloor = (d) => d > 0 && d % BOSS_EVERY === 0;
 
+  // 계단: 플레이어 주변 이 거리(가로 칸 + 세로 칸) 안에 몬스터가 있으면 내려갈 수 없음
+  const STAIRS_BLOCK_RADIUS = 4;
+
   function makeBoss(d) {
     const i = d / BOSS_EVERY - 1;
     const base = BOSSES[Math.min(i, BOSSES.length - 1)];
@@ -124,7 +127,7 @@
   }
 
   const api = {
-    MONSTERS, ELITE, BOSSES, BOSS_EVERY, BOSS_SCALE, BOSS_COLOR, GOLDEN, GOLD,
+    MONSTERS, ELITE, BOSSES, BOSS_EVERY, BOSS_SCALE, BOSS_COLOR, GOLDEN, GOLD, STAIRS_BLOCK_RADIUS,
     pool, spawnRates, pickType, eliteChance, makeMonster, isBossFloor, makeBoss, makeGolden,
     goldMultiplier, rollGold,
   };
