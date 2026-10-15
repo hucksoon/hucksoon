@@ -75,9 +75,17 @@
   const TABLES = {
     box: { common: 40, uncommon: 30, rare: 18, epic: 8, legendary: 3, set: 1 },
     drop: { common: 60, uncommon: 25, rare: 10, epic: 3.5, legendary: 1, set: 0.5 },
+    boss: { common: 20, uncommon: 30, rare: 28, epic: 15, legendary: 5, set: 2 },
+    golden: { rare: 65, epic: 25, legendary: 7, set: 3 },  // 황금 고블린: 레어 이상만
   };
-  // 몬스터를 쓰러뜨렸을 때 장비를 떨어뜨릴 확률
-  const DROP_CHANCE = 0.08;
+  // 장비를 떨어뜨릴 확률과 등급표. normal은 일반 몬스터와 포션 자리
+  const DROPS = {
+    normal: { chance: 0.08, table: "drop" },
+    elite: { chance: 0.4, table: "drop" },
+    boss: { chance: 1, table: "boss" },
+    golden: { chance: 1, table: "golden" },  // 한 마리당 2번 굴림 (처치 순번 2개 사용)
+  };
+  const DROP_CHANCE = DROPS.normal.chance;
 
   // ---- 추가 능력치 ----
   const STATS = {
@@ -148,10 +156,11 @@
     };
   }
 
-  // 몬스터 처치 1회의 결과: 드롭 없으면 null
-  function rollDrop(seed, level) {
+  // 처치 1회(또는 포션 자리 1곳)의 결과: 드롭 없으면 null. kind: "normal" | "elite" | "boss"
+  function rollDrop(seed, level, kind = "normal") {
+    const { chance, table } = DROPS[kind];
     const rng = rngFrom(`v${RULES_VERSION}|drop?|${seed}`);
-    return rng() < DROP_CHANCE ? generate(seed, "drop", level) : null;
+    return rng() < chance ? generate(seed, table, level) : null;
   }
 
   // ---- 표시 ----
@@ -187,7 +196,7 @@
   }
 
   const api = {
-    RULES_VERSION, SLOTS, SLOT_NAMES, WEAPONS, ARMOR, RARITIES, TABLES, DROP_CHANCE, STATS, SETS,
+    RULES_VERSION, SLOTS, SLOT_NAMES, WEAPONS, ARMOR, RARITIES, TABLES, DROPS, DROP_CHANCE, STATS, SETS,
     rngFrom, generate, rollDrop, itemName, formatStat, totals,
   };
   if (typeof module === "object" && module.exports) module.exports = api;
