@@ -78,6 +78,37 @@
     text-align: center;
     max-width: 640px;
   }
+  /* ---- 터치 조작 (휴대폰 등 터치 화면에서만 보임) ---- */
+  #touch-pad, .touch-only { display: none; }
+  @media (pointer: coarse) {
+    #touch-pad {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      width: 640px;
+      max-width: 100%;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .touch-only { display: inline; }
+    .keys-only { display: none; }
+  }
+  #touch-pad button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  .dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 56px);
+    grid-template-rows: repeat(3, 52px);
+    gap: 4px;
+    grid-template-areas: ". up ." "left . right" ". down .";
+  }
+  .dpad button { font-size: 20px; padding: 0; }
+  .dpad button:active, .dpad button.held { background: var(--border); color: var(--accent); }
+  .dpad .up { grid-area: up; } .dpad .down { grid-area: down; }
+  .dpad .left { grid-area: left; } .dpad .right { grid-area: right; }
+  .actions { display: grid; grid-template-columns: repeat(2, minmax(84px, 1fr)); gap: 6px; flex: 1; max-width: 220px; }
+  .actions button { padding: 12px 6px; font-size: 14px; }
+
   .msg-hit { color: #ff8f6b; }
   .msg-good { color: #7be08a; }
   .msg-bad { color: #ff6b6b; }
@@ -100,10 +131,11 @@
     padding: 6px 12px;
     cursor: pointer;
   }
-  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  /* 터치 화면에서는 탭한 버튼에 hover 스타일이 남으므로 마우스가 있을 때만 */
+  @media (hover: hover) { button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); } }
   button:disabled { opacity: 0.4; cursor: default; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #1a1406; font-weight: bold; }
-  button.primary:hover:not(:disabled) { color: #1a1406; filter: brightness(1.08); }
+  @media (hover: hover) { button.primary:hover:not(:disabled) { color: #1a1406; filter: brightness(1.08); } }
 
   .overlay {
     position: fixed;
@@ -243,8 +275,23 @@
     <span class="lvl">Lv <b id="plvl">1</b> (<span id="xp">0</span>/<span id="xpn">0</span>)</span>
   </div>
   <canvas id="game" width="640" height="480"></canvas>
+  <div id="touch-pad" aria-label="터치 조작">
+    <div class="dpad">
+      <button type="button" class="up" data-dir="0,-1" aria-label="위로">▲</button>
+      <button type="button" class="left" data-dir="-1,0" aria-label="왼쪽으로">◀</button>
+      <button type="button" class="right" data-dir="1,0" aria-label="오른쪽으로">▶</button>
+      <button type="button" class="down" data-dir="0,1" aria-label="아래로">▼</button>
+    </div>
+    <div class="actions">
+      <button type="button" id="tp-potion">포션</button>
+      <button type="button" id="tp-inv">인벤토리</button>
+      <button type="button" id="tp-dex">도감</button>
+      <button type="button" id="tp-restart">재시작</button>
+    </div>
+  </div>
   <div id="log"></div>
-  <p class="hint">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 인벤토리: I &nbsp;·&nbsp; 도감: B &nbsp;·&nbsp; 재시작: R<br>
+  <p class="hint"><span class="keys-only">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 인벤토리: I &nbsp;·&nbsp; 도감: B &nbsp;·&nbsp; 재시작: R<br></span>
+  <span class="touch-only">방향 버튼을 누르고 있으면 계속 움직여요.<br></span>
   계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다. 쓰러진 적이 장비(<b>)</b> 무기, <b>[</b> 방어구)를 떨어뜨리기도 해요.<br>
   금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고, 계단 옆 상점(<b>&amp;</b>)에서 골드로 장비를 살 수 있어요. 금빛 칸의 황금 고블린을 놓치지 마세요!</p>
 </div>
@@ -1278,6 +1325,7 @@
     document.getElementById("xp").textContent = player.xp;
     document.getElementById("xpn").textContent = player.xpNext;
     document.getElementById("best").textContent = bestDepth;
+    document.getElementById("tp-potion").textContent = `포션 (${player.potions})`;
   }
 
   // ---- 초기화 ----
@@ -1779,6 +1827,38 @@
   document.getElementById("dex-btn").addEventListener("click", (e) => { e.currentTarget.blur(); openDex(); });
   document.getElementById("dex-close").addEventListener("click", closeDex);
   dexModal.addEventListener("click", (e) => { if (e.target === dexModal) closeDex(); });
+
+  // ---- 터치 조작 ----
+  // 방향 버튼: 누르면 한 칸, 누르고 있으면 0.3초 뒤부터 계속 이동. 창이 열려 있으면 움직이지 않음
+  const anyModalOpen = () => !modal.hidden || !invModal.hidden || !dexModal.hidden || !shopModal.hidden;
+  const pad = document.getElementById("touch-pad");
+  let holdTimer = null;
+  const stopHold = () => { clearTimeout(holdTimer); clearInterval(holdTimer); holdTimer = null; };
+
+  for (const btn of pad.querySelectorAll(".dpad button")) {
+    const [dx, dy] = btn.dataset.dir.split(",").map(Number);
+    const step = () => { if (!anyModalOpen()) tryMove(dx, dy); };
+    btn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      stopHold();
+      btn.classList.add("held");
+      step();
+      holdTimer = setTimeout(() => { holdTimer = setInterval(step, 130); }, 300);
+    });
+    for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
+      btn.addEventListener(ev, () => { btn.classList.remove("held"); stopHold(); });
+    }
+  }
+  pad.addEventListener("contextmenu", (e) => e.preventDefault());  // 길게 눌러도 메뉴가 뜨지 않게
+
+  document.getElementById("tp-potion").addEventListener("click", usePotion);
+  document.getElementById("tp-inv").addEventListener("click", openInventory);
+  document.getElementById("tp-dex").addEventListener("click", openDex);
+  // 키보드 R과 달리 버튼은 실수로 누르기 쉬워서 진행 중이면 한 번 더 확인
+  document.getElementById("tp-restart").addEventListener("click", () => {
+    if (!gameOver && !confirm("새로 시작할까요? 지금 판의 층, 골드, 레벨이 사라져요. 장비는 남아요.")) return;
+    newGame();
+  });
 
   // ---- 입력 ----
   window.addEventListener("keydown", (e) => {
