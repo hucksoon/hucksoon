@@ -190,11 +190,11 @@
 
   // ---- 상점 ----
   // 5층마다 계단 방에 열림. 황금 고블린과 같은 등급표(레어 이상)로 6개를 진열, 골드로 구매
-  // 진열 바꾸기: 상점마다 최대 3번, 비용은 바꿀 때마다 2배 (층 보정은 가격과 같음)
+  // 진열 바꾸기: 상점마다 최대 3번, 비용은 바꿀 때마다 2배이고 층마다 25%씩 비싸짐
   const SHOP = {
     every: 5, slots: 6, table: "golden",
     prices: { rare: 60, epic: 150, legendary: 400, set: 300 },
-    rerolls: { max: 3, costs: [20, 40, 80] },
+    rerolls: { max: 3, costs: [40, 80, 160], perFloor: 0.25 },
   };
 
   // 진열품은 (판 ID, 층, 진열 바꾼 횟수, 칸 번호) 시드로 정해짐. 처음 진열(0번)은 바꾼 횟수 없이 씀
@@ -206,8 +206,10 @@
   // 레벨(층)에 따른 보정: × (1 + 레벨당 10%), 5골드 단위
   const levelPrice = (base, lvl) => Math.round(base * (1 + (lvl - 1) * 0.1) / 5) * 5;
   const shopPrice = (item) => levelPrice(SHOP.prices[item.rarity], item.lvl);
-  // n번째(0부터) 진열 바꾸기 비용. 더 바꿀 수 없으면 null
-  const rerollCost = (depth, n) => (n < SHOP.rerolls.max ? levelPrice(SHOP.rerolls.costs[n], depth) : null);
+  // n번째(0부터) 진열 바꾸기 비용: 기본값 × (1 + 0.25 × (층 − 1)), 5골드 단위. 더 바꿀 수 없으면 null
+  const rerollCost = (depth, n) => (n < SHOP.rerolls.max
+    ? Math.round(SHOP.rerolls.costs[n] * (1 + SHOP.rerolls.perFloor * (depth - 1)) / 5) * 5
+    : null);
 
   // ---- 표시 ----
   function itemName(item) {

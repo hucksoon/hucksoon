@@ -165,7 +165,7 @@ ${table(["등급", "기본 가격", ...SHOP_FLOORS.map(d => `${d}층`)],
 ### 진열 바꾸기
 
 - 상점마다 최대 ${I.SHOP.rerolls.max}번. 바꾸면 ${I.SHOP.slots}개가 모두 새로 진열되고, 산 칸 표시도 초기화돼요
-- 비용은 바꿀 때마다 커져요: 기본 ${I.SHOP.rerolls.costs.join(" → ")} × (1 + 층당 10%), 5골드 단위
+- 비용은 바꿀 때마다 2배, 층이 깊을수록 비싸져요: 기본 ${I.SHOP.rerolls.costs.join(" → ")} × (1 + ${I.SHOP.rerolls.perFloor} × (층 − 1)), 5골드 단위
 - 바뀐 진열도 (판 ID, 층, 바꾼 횟수)로 정해져서 새로고침해도 같아요
 
 ${table(["층", ...I.SHOP.rerolls.costs.map((_, n) => `${n + 1}번째`), "3번 모두"],
