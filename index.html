@@ -95,13 +95,20 @@
     .keys-only { display: none; }
   }
   #touch-pad button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  /* ▲는 ◀보다 오른쪽으로, ▼는 ▶보다 왼쪽으로 어긋나게 해서 헷갈리지 않게 (약 5mm) */
+  #touch-pad { --dpad-shift: 19px; }
   .dpad { display: flex; flex-direction: column; gap: 8px; flex: none; }
+  .dpad-left { align-items: flex-start; }
+  .dpad-right { align-items: flex-end; }
+  .dpad-left .up { margin-left: var(--dpad-shift); }
+  .dpad-right .down { margin-right: var(--dpad-shift); }
   .dpad button { width: 68px; height: 68px; font-size: 24px; padding: 0; }
   .dpad button:active, .dpad button.held { background: var(--border); color: var(--accent); }
   .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; flex: 1; max-width: 260px; }
   .actions button { padding: 12px 4px; font-size: 14px; white-space: nowrap; }
   /* 폭이 좁은 휴대폰(iPhone SE 등): 버튼을 조금 줄여 글자가 한 줄에 들어가게 */
   @media (max-width: 360px) {
+    #touch-pad { --dpad-shift: 10px; }
     .dpad button { width: 62px; height: 62px; }
     .actions button { font-size: 12px; padding: 12px 2px; }
   }
@@ -114,12 +121,14 @@
   /* ---- 계정 ---- */
   #account {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     align-items: center;
     gap: 10px;
     font-size: 13px;
   }
   #account-status { opacity: 0.8; }
-  button {
+  button, a.btn {
     font: inherit;
     color: var(--text);
     background: var(--panel);
@@ -128,8 +137,9 @@
     padding: 6px 12px;
     cursor: pointer;
   }
+  a.btn { text-decoration: none; display: inline-block; }
   /* 터치 화면에서는 탭한 버튼에 hover 스타일이 남으므로 마우스가 있을 때만 */
-  @media (hover: hover) { button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); } }
+  @media (hover: hover) { button:hover:not(:disabled), a.btn:hover { border-color: var(--accent); color: var(--accent); } }
   button:disabled { opacity: 0.4; cursor: default; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #1a1406; font-weight: bold; }
   @media (hover: hover) { button.primary:hover:not(:disabled) { color: #1a1406; filter: brightness(1.08); } }
@@ -263,6 +273,7 @@
     <button id="account-btn" type="button"></button>
     <button id="inv-btn" type="button">인벤토리 (I)</button>
     <button id="dex-btn" type="button">도감 (B)</button>
+    <a id="rank-btn" class="btn" href="ranking.html" target="_blank" rel="noopener">랭킹</a>
     <button id="restart-btn" class="keys-only" type="button">재시작 (R)</button>
   </div>
   <div id="stats">
@@ -368,6 +379,7 @@
 
 <script src="items.js"></script>
 <script src="monsters.js"></script>
+<script src="ranking-config.js"></script>
 <script>
 (() => {
   "use strict";
@@ -545,7 +557,7 @@
     }
 
     return {
-      configured, deviceId, requestCode, confirmCode, logout, claims, loadAttr, saveAttr,
+      configured, deviceId, requestCode, confirmCode, logout, claims, loadAttr, saveAttr, token,
       loggedIn: () => !!auth,
     };
   })();
@@ -580,6 +592,8 @@
 
     return {
       use(o) { owner = o; data = read(o); },
+      owner: () => owner,
+      items: () => all(),
       bag: () => data.bag,
       equipped: () => data.equip,
       log: () => data.log,
@@ -718,6 +732,60 @@
         store.del(key(other));
       },
     };
+  })();
+
+  // ---- 랭킹 ---- 최고 층과 가진 아이템 중 최고(등급 → 강화 → 레벨)를 랭킹 서버에 올림
+  // 서버 주소는 ranking-config.js. 로그인 사용자는 Xsolla 토큰으로, 게스트는 기기 ID로 구분
+  // 이메일은 보내지 않음 (서버가 토큰에서 직접 읽고 가린 형태로만 보여줌)
+  const RANKING_API = String(window.RANKING_API || "").replace(/\/+$/, "");
+  const Ranking = (() => {
+    const RANK = { common: 0, uncommon: 1, rare: 2, epic: 3, set: 4, legendary: 5 };
+    let timer = null;
+    let sent = "";  // 마지막으로 서버가 받은 내용 (같으면 다시 보내지 않음)
+
+    function payload() {
+      const stage = Math.max(bestDepth, depth || 0);
+      let item = null, best = -1;
+      for (const it of Inv.items()) {
+        if (!(it.rarity in RANK) || !(it.lvl <= stage)) continue;
+        const score = RANK[it.rarity] * 100000 + (it.enh || 0) * 1000 + it.lvl;
+        if (score > best) { best = score; item = it; }
+      }
+      return {
+        stage,
+        item: item && { rarity: item.rarity, enh: item.enh || 0, lvl: item.lvl, name: RLItems.itemName(item) },
+      };
+    }
+    const signature = (body) => `${Inv.owner()}|${JSON.stringify(body)}`;
+
+    async function submit() {
+      timer = null;
+      const body = payload();
+      const sig = signature(body);
+      if (sig === sent) return;
+      const headers = { "Content-Type": "application/json" };
+      if (Account.loggedIn()) {
+        const t = await Account.token();
+        if (!t) return;
+        headers.Authorization = `Bearer ${t}`;
+      } else {
+        headers["X-Guest-Id"] = Account.deviceId();
+      }
+      try {
+        const res = await fetch(`${RANKING_API}/api/score`, { method: "POST", headers, body: JSON.stringify(body) });
+        if (res.ok) sent = sig;
+      } catch {}  // 랭킹 서버가 안 돼도 게임은 계속
+    }
+
+    // 바뀐 게 있으면 몇 초 모았다가 한 번에 보냄
+    function schedule() {
+      if (!RANKING_API || Math.max(bestDepth, depth || 0) < 1) return;
+      // 로그인 직후 계정 저장본을 불러오기 전에는 보내지 않음
+      if (Account.loggedIn() && !cloudReady) return;
+      if (timer || signature(payload()) === sent) return;
+      timer = setTimeout(submit, 3000);
+    }
+    return { schedule };
   })();
 
   // ---- 게임 상태 ----
@@ -1096,6 +1164,7 @@
 
   function saveGame(flushNow = false) {
     store.set(SAVE_KEY, JSON.stringify(makeSave()));
+    Ranking.schedule();
     if (!cloudReady) return;
     clearTimeout(cloudTimer);
     cloudTimer = setTimeout(flushCloud, flushNow ? 0 : 2000);
@@ -1156,6 +1225,7 @@
         log("지금 진행 상황을 계정에 저장했다.", "good");
       }
       cloudReady = true;
+      Ranking.schedule();
     } catch (e) {
       log(`계정 저장 데이터를 불러오지 못했다: ${e.message}`, "bad");
     } finally {
@@ -1934,6 +2004,7 @@
   startFromSave(parseSave(store.get(SAVE_KEY)));
   renderAccount();
   if (Account.configured() && Account.loggedIn()) syncAfterLogin();
+  else Ranking.schedule();
 })();
 </script>
 </body>
