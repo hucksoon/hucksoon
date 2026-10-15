@@ -14,7 +14,17 @@ const APPLY = process.argv.includes("--apply");
 
 // ---- 카탈로그 정의 ----
 const CASH = "cash";
-const USD = (amount) => [{ currency: "USD", amount, is_default: true, is_enabled: true }];
+// $1당 현지 가격 (환율 기준, ₩100 / ¥10 단위 버림). 모든 유료 상품이 같은 통화 목록을 써야 함
+const LOCAL_PER_USD = [
+  { currency: "KRW", country_iso: "KR", rate: 1400 },
+  { currency: "JPY", country_iso: "JP", rate: 150 },
+];
+const USD = (amount) => [
+  { currency: "USD", amount, is_default: true, is_enabled: true },
+  ...LOCAL_PER_USD.map(({ currency, country_iso, rate }) => ({
+    currency, country_iso, amount: Math.round(amount * rate), is_default: false, is_enabled: true,
+  })),
+];
 const CASH_PRICE = (amount) => [{ sku: CASH, amount, is_default: true, is_enabled: true }];
 
 const GROUPS = [
@@ -122,6 +132,20 @@ async function ensure(label, isPresent, create) {
   else { console.log(`  ✗ ${label} 실패 (${status})`, JSON.stringify(data)); process.exitCode = 1; }
 }
 
+// 이미 있는 항목은 가격이 정의와 다를 때만 정의 전체로 교체 (Xsolla 업데이트는 병합이 아니라 교체)
+const priceKey = (prices) =>
+  (prices || []).map((p) => `${p.currency}:${Number(p.amount)}:${p.country_iso || ""}:${!!p.is_default}`).sort().join(",");
+
+async function ensurePriced(label, url, createUrl, def) {
+  const { status, data } = await api("GET", url);
+  if (status !== 200) return ensure(label, async () => false, () => api("POST", createUrl, def));
+  if (priceKey(data.prices) === priceKey(def.prices)) { console.log(`  = ${label} (이미 있음)`); return; }
+  if (!APPLY) { console.log(`  ~ ${label} (가격 갱신 예정)`); return; }
+  const res = await api("PUT", url, def);
+  if (res.status >= 200 && res.status < 300) console.log(`  ✓ ${label} 가격 갱신됨`);
+  else { console.log(`  ✗ ${label} 가격 갱신 실패 (${res.status})`, JSON.stringify(res.data)); process.exitCode = 1; }
+}
+
 // ---- 실행 ----
 console.log(APPLY ? "카탈로그 생성\n" : "확인만 합니다 (생성하려면 --apply)\n");
 
@@ -132,13 +156,13 @@ for (const g of GROUPS)
     () => api("POST", `${V2}/items/groups`, g));
 
 console.log("가상 화폐");
-await ensure(CURRENCY.sku, () => exists(`${V2}/items/virtual_currency/sku/${CURRENCY.sku}`),
-  () => api("POST", `${V2}/items/virtual_currency`, CURRENCY));
+await ensurePriced(CURRENCY.sku, `${V2}/items/virtual_currency/sku/${CURRENCY.sku}`,
+  `${V2}/items/virtual_currency`, CURRENCY);
 
 console.log("캐시 패키지");
 for (const p of PACKAGES)
-  await ensure(`${p.sku}  $${p.prices[0].amount}`, () => exists(`${V2}/items/virtual_currency/package/sku/${p.sku}`),
-    () => api("POST", `${V2}/items/virtual_currency/package`, p));
+  await ensurePriced(`${p.sku}  ${p.prices.map((x) => `${x.amount} ${x.currency}`).join(" / ")}`,
+    `${V2}/items/virtual_currency/package/sku/${p.sku}`, `${V2}/items/virtual_currency/package`, p);
 
 console.log("장비 상자");
 for (const b of BOXES)
