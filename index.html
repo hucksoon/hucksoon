@@ -174,6 +174,7 @@
   .bag-item { text-align: left; font-size: 12px; padding: 6px 8px; }
   .bag-item small { opacity: 0.55; }
   .bag-empty { font-size: 12px; opacity: 0.6; padding: 8px 2px; }
+  #inv-sell-all { width: 100%; margin-top: 6px; font-size: 12px; }
   .detail { margin-top: 10px; min-height: 60px; font-size: 12px; line-height: 1.6; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
   .detail .meta { opacity: 0.6; }
   .detail .row { margin-top: 8px; }
@@ -259,6 +260,7 @@
       <div id="inv-summary" class="summary"></div>
     </div>
     <div id="inv-bag" class="bag"></div>
+    <button id="inv-sell-all" type="button"></button>
     <div id="inv-detail" class="detail"></div>
     <button id="inv-close" type="button">닫기 (I)</button>
   </div>
@@ -561,6 +563,21 @@
         return true;
       },
       stones: () => data.stones || 0,
+
+      // 가방 전부 판매 (장착 중인 아이템은 제외). 아이템마다 판매 기록을 남김
+      sellAll() {
+        let stones = 0;
+        const count = data.bag.length;
+        for (const item of data.bag) {
+          const gain = RLItems.SELL_STONES[item.rarity];
+          stones += gain;
+          record("sell", item, { stones: gain, bulk: true });
+        }
+        data.bag = [];
+        data.stones = (data.stones || 0) + stones;
+        write();
+        return { count, stones };
+      },
 
       // 판매: 가방에서 빼고 등급만큼 강화석을 받음
       sell(id) {
@@ -1503,12 +1520,39 @@
     }, itemLabel(item), el("small", {}, ` · ${RLItems.SLOT_NAMES[item.slot]} Lv${item.lvl}`)))
       : [el("div", { className: "bag-empty" }, "가방이 비어 있어요. 던전에서 몬스터를 쓰러뜨리면 장비를 얻을 수 있어요.")]));
 
+    const sellAllBtn = document.getElementById("inv-sell-all");
+    const total = bag.reduce((s, item) => s + RLItems.SELL_STONES[item.rarity], 0);
+    sellAllBtn.textContent = bag.length ? `가방 전부 판매 (${bag.length}개 → 강화석 +${total})` : "가방 전부 판매";
+    sellAllBtn.disabled = !bag.length;
+
     renderDetail();
+  }
+
+  // 가방 전부 판매: 레어 이상이 섞여 있으면 개수를 보여주고 한 번 더 확인
+  function sellAll() {
+    const bag = Inv.bag();
+    if (!bag.length) return;
+    const total = bag.reduce((s, item) => s + RLItems.SELL_STONES[item.rarity], 0);
+    const valuable = bag.filter(item => RARITY_ORDER.indexOf(item.rarity) <= RARITY_ORDER.indexOf("rare"));
+    const detail = valuable.length
+      ? ` 레어 이상 ${valuable.length}개(${valuable.map(RLItems.itemName).slice(0, 5).join(", ")}${valuable.length > 5 ? " …" : ""})도 포함돼요.`
+      : "";
+    if (!confirm(`가방의 아이템 ${bag.length}개를 모두 판매하고 강화석 ${total}개를 받을까요?${detail} 장착 중인 아이템은 판매되지 않아요.`)) return;
+    const r = Inv.sellAll();
+    selected = null;
+    invMsg = { cls: "good", text: `아이템 ${r.count}개 판매 → 강화석 +${r.stones}` };
+    log(invMsg.text, "good");
+    afterGearChange();
   }
 
   function renderDetail() {
     const item = selectedItem();
-    if (!item) { invDetail.replaceChildren(el("span", { className: "meta" }, "아이템을 선택하면 자세한 정보가 보여요.")); return; }
+    if (!item) {
+      invDetail.replaceChildren(
+        ...(invMsg ? [el("div", { className: `msg-${invMsg.cls}` }, invMsg.text)] : []),
+        el("span", { className: "meta" }, "아이템을 선택하면 자세한 정보가 보여요."));
+      return;
+    }
     const kind = item.type ? RLItems.WEAPONS[item.type].name : RLItems.SLOT_NAMES[item.slot];
     const enhanced = RLItems.enhancedBase(item);
     const rows = [];
@@ -1599,6 +1643,7 @@
 
   document.getElementById("inv-btn").addEventListener("click", (e) => { e.currentTarget.blur(); openInventory(); });
   document.getElementById("inv-close").addEventListener("click", closeInventory);
+  document.getElementById("inv-sell-all").addEventListener("click", sellAll);
   invModal.addEventListener("click", (e) => { if (e.target === invModal) closeInventory(); });
 
   // ---- 상점 UI ----
