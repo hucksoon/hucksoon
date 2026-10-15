@@ -50,12 +50,12 @@
     xp: (d) => 10 + d * 4,
   };
 
-  // 골드: 바닥의 골드 더미와 몬스터 처치로 얻음. 층이 깊을수록 많아짐 (층 배율 = 1 + 0.25 × (층 − 1))
+  // 골드: 바닥의 골드 더미와 몬스터 처치로 얻음. 층이 깊을수록 많아짐 (층 배율 = 1 + 0.15 × (층 − 1))
   // 범위 [최소, 최대]에서 무작위로 정한 뒤 층 배율을 곱함. 장비의 "골드 획득 +%"는 그 위에 더해짐
   const GOLD = {
-    perFloor: 0.25,
-    piles: { count: [2, 4], amount: [3, 12] },
-    kill: { normal: [1, 3], elite: [10, 20], boss: [80, 120], golden: [30, 50] },
+    perFloor: 0.15,
+    piles: { count: [2, 4], amount: [2, 8] },
+    kill: { normal: [1, 2], elite: [6, 12], boss: [50, 80], golden: [20, 30] },
   };
   const goldMultiplier = (d) => 1 + GOLD.perFloor * (d - 1);
   function rollGold(range, d, rand) {
