@@ -921,8 +921,11 @@
       pickup();
       if (isShop(nx, ny)) openShop();
       if (map[ny][nx] === STAIRS) {
-        if (!bossAlive()) { descend(); return; }
-        log("보스가 살아 있는 동안 계단이 열리지 않는다.", "bad");
+        // 싸우다가 실수로 내려가지 않도록, 근처에 몬스터가 있으면 막음
+        const near = enemies.filter(e => dist(e, player) <= RLMonsters.STAIRS_BLOCK_RADIUS).length;
+        if (bossAlive()) log("보스가 살아 있는 동안 계단이 열리지 않는다.", "bad");
+        else if (near) log(`주변 ${RLMonsters.STAIRS_BLOCK_RADIUS}칸 안에 몬스터가 ${near}마리 있어 내려갈 수 없다. 정리한 뒤 다시 계단을 밟자.`, "bad");
+        else { descend(); return; }
       }
     }
     endTurn();
