@@ -733,8 +733,26 @@
     const seed = `${player.rid}|d${depth}|k${player.kills++}`;
     const item = RLItems.rollDrop(seed, depth);
     if (!item) return;
-    items.push({ x: e.x, y: e.y, type: "gear", item });
+    items.push({ x: e.x, y: e.y, type: "gear", item, from: "monster" });
     log(`${e.name}이(가) ${RLItems.itemName(item)}을(를) 떨어뜨렸다!`, null, rarityColor(item));
+  }
+
+  // 포션을 주울 때도 몬스터와 같은 확률로 장비가 나옴. 시드는 (판 ID, 층, 포션 순번)
+  function potionLoot() {
+    const seed = `${player.rid}|d${depth}|p${player.potionPicks++}`;
+    const item = RLItems.rollDrop(seed, depth);
+    if (!item) return;
+    log(`포션과 함께 ${RLItems.itemName(item)}을(를) 발견했다!`, null, rarityColor(item));
+    const gear = { x: player.x, y: player.y, type: "gear", item, from: "potion" };
+    if (!takeGear(gear)) items.push(gear);  // 가방이 가득 차면 바닥에 남김
+  }
+
+  // 가방에 넣으면 true, 가방이 가득 차서 못 넣으면 false
+  function takeGear(gear) {
+    const result = Inv.add(gear.item, { depth, from: gear.from });
+    if (result === "full") { log("가방이 가득 찼다. 인벤토리(I)에서 정리해 주세요.", "bad"); return false; }
+    if (result === "ok") log(`${RLItems.itemName(gear.item)}을(를) 주웠다.`, null, rarityColor(gear.item));
+    return true;
   }
 
   function gainXp(amount) {
@@ -753,12 +771,11 @@
   function pickup() {
     for (const it of items.filter(i => i.x === player.x && i.y === player.y)) {
       if (it.type === "gear") {
-        const result = Inv.add(it.item, { depth });
-        if (result === "full") { log("가방이 가득 찼다. 인벤토리(I)에서 정리해 주세요.", "bad"); continue; }
-        if (result === "ok") log(`${RLItems.itemName(it.item)}을(를) 주웠다.`, null, rarityColor(it.item));
+        if (!takeGear(it)) continue;
       } else if (it.type === "potion") {
         player.potions++;
         log("포션을 주웠다. (Q로 사용)", "info");
+        potionLoot();
       } else if (it.type === "gold") {
         const amount = Math.round(it.amount * (1 + stats().gold / 100));
         player.gold += amount;
@@ -803,7 +820,7 @@
       run: gameOver ? null : {
         d: depth, hp: player.hp, mh: player.maxHp, a: player.atk, g: player.gold,
         p: player.potions, l: player.plvl, x: player.xp, xn: player.xpNext,
-        rid: player.rid, k: player.kills,
+        rid: player.rid, k: player.kills, pp: player.potionPicks,
       },
     };
   }
@@ -853,7 +870,7 @@
       gold: r.g,
       potions: r.p,
       plvl: r.l, xp: r.x, xpNext: r.xn,
-      rid: r.rid || newRunId(), kills: r.k || 0,
+      rid: r.rid || newRunId(), kills: r.k || 0, potionPicks: r.pp || 0,
     };
     player.hp = Math.min(player.hp, stats().maxHp);
     logEl.innerHTML = "";
@@ -1008,7 +1025,7 @@
       gold: 0,
       potions: 1,
       plvl: 1, xp: 0, xpNext: 10,
-      rid: newRunId(), kills: 0,
+      rid: newRunId(), kills: 0, potionPicks: 0,
     };
     player.hp = stats().maxHp;  // 장비로 늘어난 최대 HP까지 채우고 시작
     logEl.innerHTML = "";
