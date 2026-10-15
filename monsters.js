@@ -28,6 +28,19 @@
     { id: "hydra",      ch: "H", name: "히드라",      color: "#3cc8a0", hp: 50, atk: 16, def: 8, xp: 75, from: 17 },
   ];
 
+  // 층 보정: 같은 몬스터도 깊은 층일수록 강해짐. from층부터 n = 층 − from + 1 단계
+  //   HP × (1 + hp × n), 공격력 × (1 + atk × n), 방어력 + 내림(def × n)
+  // 몬스터가 플레이어를 때릴 때 방어력은 비율로 줄임: 피해 = 공격 × 2공격 / (2공격 + 방어력)
+  const DEFENSE_K = 2;
+  const FLOOR = { from: 3, hp: 0.2, atk: 0.15, def: 0.4 };
+  const floorScale = (d) => {
+    const n = Math.max(0, d - FLOOR.from + 1);
+    return { hp: 1 + FLOOR.hp * n, atk: 1 + FLOOR.atk * n, def: Math.floor(FLOOR.def * n) };
+  };
+
+  // 방어력이 공격력과 같으면 피해 2/3, 2배면 1/2, 4배면 1/3. 방어력이 아무리 높아도 최소 1
+  const damageToPlayer = (atk, def) => Math.max(1, Math.round(atk * DEFENSE_K * atk / (DEFENSE_K * atk + Math.max(0, def))));
+
   // 정예: 2층부터 8%, 층마다 1%p씩 올라 최대 20%
   const ELITE = { from: 2, base: 0.08, perFloor: 0.01, max: 0.2, hpMul: 2, atkMul: 1.5, defAdd: 1, xpMul: 3 };
 
@@ -86,14 +99,19 @@
 
   const eliteChance = (d) => (d < ELITE.from ? 0 : Math.min(ELITE.max, ELITE.base + (d - ELITE.from) * ELITE.perFloor));
 
-  function makeMonster(t, kind = "normal") {
-    const m = { id: t.id, ch: t.ch, name: t.name, color: t.color, hp: t.hp, atk: t.atk, def: t.def, xp: t.xp, kind };
+  // d: 지금 층 (층 보정을 적용)
+  function makeMonster(t, kind = "normal", d = 1) {
+    const f = floorScale(d);
+    const m = {
+      id: t.id, ch: t.ch, name: t.name, color: t.color, kind,
+      hp: Math.round(t.hp * f.hp), atk: Math.round(t.atk * f.atk), def: t.def + f.def, xp: t.xp,
+    };
     if (kind === "elite") {
       Object.assign(m, {
         name: `정예 ${t.name}`,
-        hp: t.hp * ELITE.hpMul,
-        atk: Math.ceil(t.atk * ELITE.atkMul),
-        def: t.def + ELITE.defAdd,
+        hp: m.hp * ELITE.hpMul,
+        atk: Math.ceil(m.atk * ELITE.atkMul),
+        def: m.def + ELITE.defAdd,
         xp: t.xp * ELITE.xpMul,
       });
     }
@@ -110,15 +128,18 @@
     const i = d / BOSS_EVERY - 1;
     const base = BOSSES[Math.min(i, BOSSES.length - 1)];
     const scale = 1 + BOSS_SCALE * Math.max(0, i - (BOSSES.length - 1));
-    const stat = (v) => Math.round(v * scale);
+    // 보스도 일반 몬스터와 같은 층 보정을 받음
+    const f = floorScale(d);
+    const stat = (v, mul = 1) => Math.round(v * scale * mul);
+    const hp = stat(base.hp, f.hp);
     return {
       id: base.id, ch: base.ch, name: base.name, color: BOSS_COLOR, kind: "boss",
-      hp: stat(base.hp), maxHp: stat(base.hp), atk: stat(base.atk), def: stat(base.def), xp: stat(base.xp),
+      hp, maxHp: hp, atk: stat(base.atk, f.atk), def: stat(base.def) + f.def, xp: stat(base.xp),
     };
   }
 
   function makeGolden(d) {
-    const def = Math.max(0, ...pool(d).map(m => m.def)) + GOLDEN.defAdd;
+    const def = Math.max(0, ...pool(d).map(m => m.def)) + floorScale(d).def + GOLDEN.defAdd;
     const hp = GOLDEN.hp(d);
     return {
       id: GOLDEN.id, ch: GOLDEN.ch, name: GOLDEN.name, color: GOLDEN.color, kind: "golden",
@@ -127,7 +148,7 @@
   }
 
   const api = {
-    MONSTERS, ELITE, BOSSES, BOSS_EVERY, BOSS_SCALE, BOSS_COLOR, GOLDEN, GOLD, STAIRS_BLOCK_RADIUS,
+    MONSTERS, FLOOR, floorScale, DEFENSE_K, damageToPlayer, ELITE, BOSSES, BOSS_EVERY, BOSS_SCALE, BOSS_COLOR, GOLDEN, GOLD, STAIRS_BLOCK_RADIUS,
     pool, spawnRates, pickType, eliteChance, makeMonster, isBossFloor, makeBoss, makeGolden,
     goldMultiplier, rollGold,
   };

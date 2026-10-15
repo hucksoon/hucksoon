@@ -2,6 +2,7 @@
 // monsters.js와 items.js의 값으로 문서를 만든다. 수치를 바꾼 뒤 다시 실행하면 문서가 맞춰진다.
 //   docs/monsters.md — 몬스터, 정예, 황금 고블린, 보스, 장비 드롭
 //   docs/economy.md  — 골드, 상점, 판매와 강화
+//   docs/items.md    — 장비 능력치 범위, 주/추가 능력치, 고대 아이템, 강화, 세트
 //
 //   node tools/gen-docs.mjs          # 문서 갱신
 //   node tools/gen-docs.mjs --check  # 문서가 최신인지 확인만 (다르면 종료 코드 1)
@@ -40,11 +41,28 @@ ${HEADER}
 ${table(["표시", "이름", "HP", "공격", "방어", "경험치", "나오는 층"],
   M.MONSTERS.map(m => [`\`${m.ch}\``, m.name, m.hp, m.atk, m.def, m.xp, floors(m)]))}
 
-- 플레이어가 주는 피해: 공격력 + (0~1) − 몬스터 방어력 (최소 1, 치명타면 공격력 부분이 2배)
-- 몬스터가 주는 피해: 공격력 + (0~1) − 플레이어 방어력 (최소 1)
+위 표는 **1~${M.FLOOR.from - 1}층 기준** 수치예요. 더 깊은 층에서는 [층 보정](#층-보정)만큼 강해져요.
+
+- 플레이어가 주는 피해: 공격력 + (0~1) − 몬스터 방어력 (최소 1, 치명타면 공격력 부분이 2배 + 장비의 치명타 피해)
+- 몬스터가 주는 피해: 방어력이 **비율로** 줄여요. 피해 = 공격 × ${M.DEFENSE_K}공격 ÷ (${M.DEFENSE_K}공격 + 방어력), 최소 1
+  - 방어력이 공격력과 같으면 피해 ${pct(M.damageToPlayer(100, 100) / 100)}, 2배면 ${pct(M.damageToPlayer(100, 200) / 100)}, 4배면 ${pct(M.damageToPlayer(100, 400) / 100)}
+- 포션: 최대 HP의 30% 회복 (최소 8)
 - 한 층의 마릿수: (4 + 층) ~ (6 + 층×2)
 - 계단: 주변 ${M.STAIRS_BLOCK_RADIUS}칸(가로 칸 + 세로 칸) 안에 몬스터가 있으면 내려갈 수 없어요. 정리한 뒤 다시 밟으면 내려가요
 - 처치 골드는 [경제 문서](economy.md#골드)를 보세요
+
+## 층 보정
+
+같은 몬스터도 깊은 층일수록 강해져요. ${M.FLOOR.from}층부터 한 층마다 HP +${pct(M.FLOOR.hp)}, 공격력 +${pct(M.FLOOR.atk)}, 방어력 +${M.FLOOR.def}씩 (방어력은 내림).
+정예와 보스도 같은 보정을 받아요 (정예 배율은 보정한 값에 곱해요).
+
+${table(["층", "HP 배율", "공격력 배율", "방어력 +", "예: 그 층에서 가장 강한 몬스터"],
+  FLOORS.map(d => {
+    const f = M.floorScale(d);
+    const top = M.spawnRates(d).at(-1).monster;
+    const m = M.makeMonster(top, "normal", d);
+    return [d, `×${Math.round(f.hp * 100) / 100}`, `×${Math.round(f.atk * 100) / 100}`, f.def, `${m.name} HP ${m.hp} · 공격 ${m.atk} · 방어 ${m.def}`];
+  }))}
 
 ## 층별 출현 비율
 
@@ -177,7 +195,8 @@ ${table(["층", ...I.SHOP.rerolls.costs.map((_, n) => `${n + 1}번째`), "3번 �
 
 - 판매하면 등급에 따라 강화석을 받아요: ${Object.entries(I.SELL_STONES).map(([r, n]) => `${I.RARITIES[r].name} ${n}`).join(", ")}
 - +N으로 강화할 때 강화석 N개가 들어요. 실패해도 아이템과 강화 단계는 그대로이고 강화석만 사라져요
-- 강화 1단계마다 기본 능력치가 +10% 올라요 (능력치마다 최소 +1). 추가 능력치 줄은 그대로예요
+- 강화 1단계마다 주 능력치가 +10% 올라요 (최소 +1, 치명타·흡혈 같은 % 능력치는 2단계마다 +1)
+- +${I.ENHANCE.lineSteps.join(", +")}이 되면 추가 능력치 중 하나가 그 능력치 최대치의 ${pct(I.ENHANCE.lineBoost)}(최소 +1)만큼 올라요. 자세한 건 [장비 문서](items.md#강화)
 - 결과는 (아이템 ID, 몇 번째 시도)로 정해져서 새로고침해도 바뀌지 않아요
 
 ${table(["강화", ...Array.from({ length: I.ENHANCE.max }, (_, i) => `+${i + 1}`)], [
@@ -186,8 +205,78 @@ ${table(["강화", ...Array.from({ length: I.ENHANCE.max }, (_, i) => `+${i + 1}
 ])}
 `;
 
+// ---------------------------------------------------------------- items.md
+const LEVELS = [1, 3, 5, 10, 15, 20, 30];
+const fmtR = (stat, r) => I.formatRange(stat, r);
+const sample = (slot, rarity, lvl, type = slot === "weapon" ? "dagger" : null) => ({ slot, rarity, lvl, type, main: [] });
+const itemsMd = `# 장비: 능력치, 고대 아이템, 강화, 세트
+
+${HEADER}
+
+## 능력치가 붙는 방식
+
+- 모든 능력치는 아이템 레벨(얻은 층)로 정해지는 **[최소~최대] 범위**에서 정해져요
+- **최대치가 나올 확률은 능력치마다 ${pct(I.MAX_ROLL_CHANCE)}**, 나머지 ${pct(1 - I.MAX_ROLL_CHANCE)}는 최소 ~ (최대 − 1)에서 고르게 나와요
+- 인벤토리에서 값 옆에 범위가 보이고, 최대치면 ▲ 표시가 붙어요
+- 결과는 아이템 시드로 정해져서 서버에서 똑같이 다시 계산할 수 있어요 (규칙 버전 v${I.RULES_VERSION})
+
+## 주 능력치 ★
+
+강화하면 함께 오르는 중요한 능력치예요.
+
+${table(["등급", "주 능력치 개수", "추가 능력치 줄 수", "범위 배율"],
+  Object.entries(I.RARITIES).map(([r, x]) => [x.name, I.MAIN.count[r].join("~") + "개", x.lines + "줄", `×${I.MAIN.rarityMul[r]}`]))}
+
+- 무기는 **공격력**, 방어구는 **방어력**이 항상 첫 번째로 붙고, 나머지는 후보에서 무작위
+  - 무기 후보: ${I.MAIN.pool.weapon.map(k => I.STATS[k].name).join(", ")}
+  - 방어구 후보: ${I.MAIN.pool.armor.map(k => I.STATS[k].name).join(", ")}
+- 방어구의 공격력·치명타, 무기의 최대 HP는 범위가 절반이에요. 도끼의 공격력은 ×${I.WEAPONS.axe.atkMul}
+
+### 주 능력치 범위 (커먼 기준, 등급 배율을 곱함)
+
+${table(["아이템 레벨", ...Object.keys(I.MAIN.range).map(k => I.STATS[k].name + (["atk", "crit", "lifesteal"].includes(k) ? " (무기)" : " (방어구)"))],
+  LEVELS.map(l => [l, ...Object.keys(I.MAIN.range).map(k => fmtR(k, I.mainRange(k, sample(["atk", "crit", "lifesteal"].includes(k) ? "weapon" : "chest", "common", l))))]))}
+
+### 예: 레벨 10 장비의 주 능력치 범위
+
+${table(["등급", "무기 공격력", "도끼 공격력", "방어구 방어력", "방어구 최대 HP"],
+  Object.keys(I.RARITIES).map(r => [I.RARITIES[r].name,
+    fmtR("atk", I.mainRange("atk", sample("weapon", r, 10))), fmtR("atk", I.mainRange("atk", sample("weapon", r, 10, "axe"))),
+    fmtR("def", I.mainRange("def", sample("chest", r, 10))), fmtR("hp", I.mainRange("hp", sample("chest", r, 10)))]))}
+
+## 추가 능력치 ◆
+
+등급별 줄 수만큼, 서로 다른 종류로 붙어요. 범위는 등급과 상관없이 아이템 레벨로만 정해져요.
+
+${table(["아이템 레벨", ...I.STAT_KEYS.map(k => I.STATS[k].name)],
+  LEVELS.map(l => [l, ...I.STAT_KEYS.map(k => fmtR(k, I.lineRange(k, l)))]))}
+
+## 고대 아이템
+
+- **모든 능력치(주 + 추가)가 최대치**로 붙은 아이템이에요. 이름 앞에 **"고대"**가 붙고, 인벤토리에서 금빛으로 빛나요
+- 능력치가 많을수록 어려워요: 능력치 ${[2, 3, 5, 7, 9].join("·")}개일 때 각각 ${[2, 3, 5, 7, 9].map(n => { const p = I.MAX_ROLL_CHANCE ** n; return p >= 0.001 ? pct(p) : `약 ${Math.round(1 / p).toLocaleString("en-US")}분의 1`; }).join(" · ")}
+  (범위의 최소와 최대가 같은 능력치는 항상 최대치라 실제로는 조금 더 자주 나와요)
+
+## 강화
+
+- 강화 1단계마다 **주 능력치 +${pct(I.ENHANCE.statPerLevel)}** (최소 +1, 치명타·흡혈 같은 % 능력치는 2단계마다 +1)
+- **+${I.ENHANCE.lineSteps.join(", +")}**이 되면 추가 능력치 중 하나가 그 능력치 **최대치의 ${pct(I.ENHANCE.lineBoost)}**(최소 +1)만큼 올라요
+  - 어느 줄이 오를지는 (아이템 ID, 강화 단계)로 정해져요. 같은 줄이 여러 번 오를 수도 있어요
+- 성공 확률과 강화석은 [경제 문서](economy.md#판매와-강화)를 보세요
+
+## 세트
+
+구하기 아주 어려운 만큼(장비 상자 ${pct(I.TABLES.box.set / 100)}, 몬스터 드롭 ${pct(I.TABLES.drop.set / 100)}) 효과가 강해요. 같은 세트를 2·4·6개 입을 때마다 효과가 하나씩 켜져요.
+
+${Object.values(I.SETS).map(set => `### ${set.name}
+
+${table(["입은 개수", "효과"], set.bonuses.map(b => [`${b.count}개`, b.text]))}`).join("\n\n")}
+
+- % 효과는 레벨과 장비로 얻은 능력치 전체에 곱해져요
+`;
+
 // ---------------------------------------------------------------- 쓰기 / 확인
-const DOCS = { "monsters.md": monstersMd, "economy.md": economyMd };
+const DOCS = { "monsters.md": monstersMd, "economy.md": economyMd, "items.md": itemsMd };
 const path = (name) => fileURLToPath(new URL(`../docs/${name}`, import.meta.url));
 
 if (process.argv.includes("--check")) {
