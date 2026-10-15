@@ -162,6 +162,15 @@ ${table(["층", "더미", "처치", "보스", "황금 고블린", "합계", "1�
 ${table(["등급", "기본 가격", ...SHOP_FLOORS.map(d => `${d}층`)],
   Object.keys(I.SHOP.prices).map(r => [I.RARITIES[r].name, I.SHOP.prices[r], ...SHOP_FLOORS.map(l => I.shopPrice({ rarity: r, lvl: l }))]))}
 
+### 진열 바꾸기
+
+- 상점마다 최대 ${I.SHOP.rerolls.max}번. 바꾸면 ${I.SHOP.slots}개가 모두 새로 진열되고, 산 칸 표시도 초기화돼요
+- 비용은 바꿀 때마다 커져요: 기본 ${I.SHOP.rerolls.costs.join(" → ")} × (1 + 층당 10%), 5골드 단위
+- 바뀐 진열도 (판 ID, 층, 바꾼 횟수)로 정해져서 새로고침해도 같아요
+
+${table(["층", ...I.SHOP.rerolls.costs.map((_, n) => `${n + 1}번째`), "3번 모두"],
+  SHOP_FLOORS.map(d => { const c = I.SHOP.rerolls.costs.map((_, n) => I.rerollCost(d, n)); return [d, ...c, c.reduce((x, y) => x + y, 0)]; }))}
+
 1층부터 상점 층까지(그 층 보스 포함) 모은 평균 골드: ${SHOP_FLOORS.map(d => `${d}층 약 ${Math.round(cumulative[d - 1])}`).join(", ")} (상점에서 쓴 골드는 빼지 않은 값)
 
 ## 판매와 강화

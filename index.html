@@ -254,7 +254,8 @@
   .shop-card .price { margin-top: auto; padding-top: 6px; color: var(--accent); }
   .shop-card button { margin-top: 4px; }
   .shop-card.sold { opacity: 0.45; }
-  #shop-close { width: 100%; margin-top: 12px; }
+  #shop-reroll { width: 100%; margin-top: 10px; }
+  #shop-close { width: 100%; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -322,6 +323,7 @@
     <p class="sub">레어 이상 장비만 팔아요. 진열은 이 층에서만 열려 있어요.</p>
     <p id="shop-msg"></p>
     <div id="shop-items" class="shop-grid"></div>
+    <button id="shop-reroll" type="button"></button>
     <button id="shop-close" type="button">닫기 (Esc)</button>
   </div>
 </div>
@@ -720,7 +722,8 @@
   // ---- 게임 상태 ----
   let map, visible, seen, player, enemies, items, depth, gameOver;
   let shop = null;       // 상점 칸 { x, y } (5층마다)
-  let shopBought = [];   // 이번 층 상점에서 산 칸 번호
+  let shopBought = [];   // 이번 층 상점에서 산 칸 번호 (지금 진열 기준)
+  let shopRerolls = 0;   // 이번 층 상점에서 진열을 바꾼 횟수
   let bestDepth = 0;
 
   const newRunId = () => randomId().replace(/-/g, "").slice(0, 12);
@@ -1049,6 +1052,7 @@
   function descend() {
     depth++;
     shopBought = [];
+    shopRerolls = 0;
     bestDepth = Math.max(bestDepth, depth);
     log(`${depth}층으로 내려간다...`, "info");
     const rooms = generateDungeon();
@@ -1073,7 +1077,7 @@
       run: gameOver ? null : {
         d: depth, hp: player.hp, mh: player.maxHp, a: player.atk, g: player.gold,
         p: player.potions, l: player.plvl, x: player.xp, xn: player.xpNext,
-        rid: player.rid, k: player.kills, pp: player.potionPicks, sb: shopBought,
+        rid: player.rid, k: player.kills, pp: player.potionPicks, sb: shopBought, sr: shopRerolls,
       },
     };
   }
@@ -1126,6 +1130,7 @@
       rid: r.rid || newRunId(), kills: r.k || 0, potionPicks: r.pp || 0,
     };
     shopBought = Array.isArray(r.sb) ? r.sb : [];
+    shopRerolls = r.sr || 0;
     player.hp = Math.min(player.hp, stats().maxHp);
     logEl.innerHTML = "";
     log(`${depth}층에서 이어서 시작한다.`, "info");
@@ -1345,6 +1350,7 @@
       rid: newRunId(), kills: 0, potionPicks: 0,
     };
     shopBought = [];
+    shopRerolls = 0;
     player.hp = stats().maxHp;  // 장비로 늘어난 최대 HP까지 채우고 시작
     logEl.innerHTML = "";
     log("던전에 발을 들였다. 계단(>)을 찾아 더 깊이 내려가라.", "info");
@@ -1704,7 +1710,14 @@
 
   function renderShop() {
     document.getElementById("shop-gold").textContent = `보유 골드 ${player.gold}`;
-    const stock = RLItems.shopStock(player.rid, depth);
+    const stock = RLItems.shopStock(player.rid, depth, shopRerolls);
+    const cost = RLItems.rerollCost(depth, shopRerolls);
+    const rerollBtn = document.getElementById("shop-reroll");
+    const max = RLItems.SHOP.rerolls.max;
+    rerollBtn.textContent = cost == null
+      ? `진열 바꾸기 (이번 상점은 ${max}번 모두 사용)`
+      : `진열 바꾸기 (${cost} 골드 · 남은 횟수 ${max - shopRerolls}/${max})`;
+    rerollBtn.disabled = cost == null || player.gold < cost;
     document.getElementById("shop-items").replaceChildren(...stock.map((item, i) => {
       const price = RLItems.shopPrice(item);
       const sold = shopBought.includes(i);
@@ -1723,7 +1736,7 @@
 
   function buyItem(i) {
     if (shopBought.includes(i)) return;
-    const item = RLItems.shopStock(player.rid, depth)[i];
+    const item = RLItems.shopStock(player.rid, depth, shopRerolls)[i];
     const price = RLItems.shopPrice(item);
     if (player.gold < price) return;
     if (Inv.buy(item, price) === "full") {
@@ -1741,6 +1754,21 @@
     renderShop();
   }
 
+  // 진열 바꾸기: 6개를 새로 진열하고 산 칸 표시를 초기화. 바꿀 때마다 비용이 2배
+  function rerollShop() {
+    const cost = RLItems.rerollCost(depth, shopRerolls);
+    if (cost == null || player.gold < cost) return;
+    player.gold -= cost;
+    shopRerolls++;
+    shopBought = [];
+    shopMsg.className = "msg-good";
+    shopMsg.textContent = `진열을 바꿨어요. (-${cost} 골드)`;
+    log(`상점 진열을 바꿨다. (-${cost} 골드)`, "info");
+    updateStats();
+    saveGame();
+    renderShop();
+  }
+
   function openShop() {
     shopMsg.textContent = "";
     shopModal.hidden = false;
@@ -1750,6 +1778,7 @@
   function closeShop() { shopModal.hidden = true; }
 
   document.getElementById("shop-close").addEventListener("click", closeShop);
+  document.getElementById("shop-reroll").addEventListener("click", rerollShop);
   shopModal.addEventListener("click", (e) => { if (e.target === shopModal) closeShop(); });
 
   // ---- 도감 UI ----
