@@ -199,7 +199,8 @@
   <canvas id="game" width="640" height="480"></canvas>
   <div id="log"></div>
   <p class="hint">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 인벤토리: I &nbsp;·&nbsp; 재시작: R<br>
-  계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다. 쓰러진 적이 장비(<b>)</b> 무기, <b>[</b> 방어구)를 떨어뜨리기도 해요.</p>
+  계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다. 쓰러진 적이 장비(<b>)</b> 무기, <b>[</b> 방어구)를 떨어뜨리기도 해요.<br>
+  금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고 있어요.</p>
 </div>
 
 <div id="inv-modal" class="overlay" hidden>
@@ -541,12 +542,65 @@
   }
   const heal = (n) => { player.hp = Math.min(stats().maxHp, player.hp + n); };
 
-  const ENEMY_TYPES = [
-    { ch: "r", name: "쥐",     color: "#a58b6f", hp: 3,  atk: 1, xp: 2 },
-    { ch: "g", name: "고블린", color: "#7bce6b", hp: 6,  atk: 2, xp: 5 },
-    { ch: "o", name: "오크",   color: "#5fae4e", hp: 10, atk: 3, xp: 9 },
-    { ch: "T", name: "트롤",   color: "#9b7bce", hp: 16, atk: 5, xp: 16 },
+  // ---- 몬스터 ----
+  // from~until 층에서 나옴. 그 층에 나올 수 있는 종류 중 뒤(강한) 종류일수록 2배씩 자주 나옴
+  const MONSTERS = [
+    { ch: "r", name: "쥐",          color: "#a58b6f", hp: 3,  atk: 1,  def: 0, xp: 2,  from: 1,  until: 5 },
+    { ch: "b", name: "박쥐",        color: "#9a9ab5", hp: 4,  atk: 2,  def: 0, xp: 3,  from: 1,  until: 6 },
+    { ch: "g", name: "고블린",      color: "#7bce6b", hp: 6,  atk: 2,  def: 1, xp: 5,  from: 2,  until: 8 },
+    { ch: "s", name: "해골 병사",   color: "#e8e2cf", hp: 8,  atk: 3,  def: 1, xp: 7,  from: 3,  until: 10 },
+    { ch: "o", name: "오크",        color: "#5fae4e", hp: 10, atk: 3,  def: 1, xp: 9,  from: 4,  until: 12 },
+    { ch: "T", name: "트롤",        color: "#9b7bce", hp: 16, atk: 5,  def: 2, xp: 16, from: 6,  until: 15 },
+    { ch: "W", name: "망령",        color: "#7fd0e8", hp: 18, atk: 7,  def: 3, xp: 22, from: 8 },
+    { ch: "M", name: "미노타우로스", color: "#c8743c", hp: 28, atk: 9,  def: 4, xp: 32, from: 10 },
+    { ch: "L", name: "리치",        color: "#c27bff", hp: 24, atk: 12, def: 5, xp: 42, from: 12 },
+    { ch: "D", name: "어린 드래곤", color: "#ff6b4a", hp: 40, atk: 14, def: 7, xp: 60, from: 15 },
   ];
+
+  // 보스: 5층마다 계단 방에 나오고, 쓰러뜨려야 계단이 열림.
+  // 준비된 보스를 다 지나면 마지막 보스가 5층마다 30%씩 강해져서 다시 나옴
+  const BOSSES = [
+    { ch: "G", name: "고블린 왕",   hp: 45,  atk: 6,  def: 2, xp: 60 },   // 5층
+    { ch: "O", name: "오우거 족장", hp: 90,  atk: 10, def: 4, xp: 140 },  // 10층
+    { ch: "K", name: "리치 군주",   hp: 150, atk: 15, def: 7, xp: 260 },  // 15층
+  ];
+  const BOSS_EVERY = 5;
+  const BOSS_COLOR = "#ff5a5a", ELITE_COLOR = "#ffcf5c";
+
+  // 정예: 2층부터 8%, 층마다 1%p씩 올라 최대 20%. HP 2배, 공격력 1.5배, 방어력 +1, 경험치 3배
+  const eliteChance = (d) => (d < 2 ? 0 : Math.min(0.2, 0.08 + (d - 2) * 0.01));
+
+  function pickMonsterType(d) {
+    const pool = MONSTERS.filter(m => d >= m.from && d <= (m.until ?? Infinity));
+    let r = rnd(2 ** pool.length - 1);  // 가중치 1, 2, 4, 8, ... 의 합
+    for (let i = 0; i < pool.length; i++) {
+      if ((r -= 2 ** i) < 0) return pool[i];
+    }
+    return pool[pool.length - 1];
+  }
+
+  function makeMonster(t, kind = "normal") {
+    const m = { ch: t.ch, name: t.name, color: t.color, hp: t.hp, atk: t.atk, def: t.def, xp: t.xp, kind };
+    if (kind === "elite") {
+      Object.assign(m, { name: `정예 ${t.name}`, hp: t.hp * 2, atk: Math.ceil(t.atk * 1.5), def: t.def + 1, xp: t.xp * 3 });
+    }
+    m.maxHp = m.hp;
+    return m;
+  }
+
+  function makeBoss(d) {
+    const i = d / BOSS_EVERY - 1;
+    const base = BOSSES[Math.min(i, BOSSES.length - 1)];
+    const scale = 1 + 0.3 * Math.max(0, i - (BOSSES.length - 1));
+    const stat = (v) => Math.round(v * scale);
+    return {
+      ch: base.ch, name: base.name, color: BOSS_COLOR, kind: "boss",
+      hp: stat(base.hp), maxHp: stat(base.hp), atk: stat(base.atk), def: stat(base.def), xp: stat(base.xp),
+    };
+  }
+
+  const isBossFloor = (d) => d % BOSS_EVERY === 0;
+  const bossAlive = () => enemies.some(e => e.kind === "boss");
 
   // ---- 던전 생성 (방 + 통로) ----
   function generateDungeon() {
@@ -614,16 +668,26 @@
     }
     map[far.cy][far.cx] = STAIRS;
 
-    // 적 스폰 (층이 깊을수록 강해짐)
+    // 적 스폰 (층이 깊을수록 강한 종류가 더 자주, 가끔 정예)
     enemies = [];
     const count = between(4 + depth, 6 + depth * 2);
-    const maxTier = Math.min(ENEMY_TYPES.length - 1, Math.floor(depth / 2));
     for (let i = 0; i < count; i++) {
-      const spot = randomFloor([player]);
+      const spot = randomFloor([player, ...enemies]);
       if (!spot) break;
-      const tier = between(0, maxTier);
-      const t = ENEMY_TYPES[tier];
-      enemies.push({ x: spot.x, y: spot.y, ...t, hp: t.hp, maxHp: t.hp });
+      const kind = Math.random() < eliteChance(depth) ? "elite" : "normal";
+      enemies.push({ x: spot.x, y: spot.y, ...makeMonster(pickMonsterType(depth), kind) });
+    }
+
+    // 보스는 계단 방에서 계단을 지킴
+    if (isBossFloor(depth)) {
+      const tiles = [];
+      for (let y = far.y; y < far.y + far.h; y++)
+        for (let x = far.x; x < far.x + far.w; x++)
+          if (map[y][x] === FLOOR && !enemies.some(e => e.x === x && e.y === y)) tiles.push({ x, y });
+      const spot = tiles.length ? tiles[rnd(tiles.length)] : randomFloor([player, ...enemies]);
+      const boss = makeBoss(depth);
+      enemies.push({ ...spot, ...boss });
+      log(`강한 기운이 느껴진다… ${boss.name}이(가) 계단을 지키고 있다!`, null, BOSS_COLOR);
     }
 
     // 아이템 스폰
@@ -690,7 +754,10 @@
     else {
       player.x = nx; player.y = ny;
       pickup();
-      if (map[ny][nx] === STAIRS) { descend(); return; }
+      if (map[ny][nx] === STAIRS) {
+        if (!bossAlive()) { descend(); return; }
+        log("보스가 살아 있는 동안 계단이 열리지 않는다.", "bad");
+      }
     }
     endTurn();
   }
@@ -704,9 +771,10 @@
     if (attacker === player) {
       const s = stats();
       const crit = Math.random() * 100 < s.crit;
-      const dmg = (s.atk + rnd(2)) * (crit ? 2 : 1);
+      const dmg = Math.max(1, (s.atk + rnd(2)) * (crit ? 2 : 1) - target.def);
       target.hp -= dmg;
-      log(`${target.name}에게 ${dmg} 피해!${crit ? " (치명타)" : ""}`, "hit");
+      const left = target.kind !== "normal" ? ` (남은 HP ${Math.max(0, target.hp)}/${target.maxHp})` : "";
+      log(`${target.name}에게 ${dmg} 피해!${crit ? " (치명타)" : ""}${left}`, "hit");
       const drain = Math.floor(dmg * s.lifesteal / 100);
       if (drain > 0) heal(drain);
       if (target.hp <= 0) killEnemy(target);
@@ -723,17 +791,18 @@
     const s = stats();
     const xp = Math.round(e.xp * (1 + s.xp / 100));
     log(`${e.name} 처치! (+${xp} XP)`, "good");
+    if (e.kind === "boss") log("보스를 쓰러뜨렸다! 계단이 열렸다.", null, BOSS_COLOR);
     if (s.killHeal) heal(s.killHeal);
     dropLoot(e);
     gainXp(xp);
   }
 
-  // 드롭 여부와 아이템은 (판 ID, 층, 처치 순번) 시드로 정해짐 → 같은 기록이면 서버에서 똑같이 다시 계산됨
+  // 드롭 여부와 아이템은 (판 ID, 층, 처치 순번) 시드와 몬스터 등급으로 정해짐 → 서버에서 똑같이 다시 계산됨
   function dropLoot(e) {
     const seed = `${player.rid}|d${depth}|k${player.kills++}`;
-    const item = RLItems.rollDrop(seed, depth);
+    const item = RLItems.rollDrop(seed, depth, e.kind);
     if (!item) return;
-    items.push({ x: e.x, y: e.y, type: "gear", item, from: "monster" });
+    items.push({ x: e.x, y: e.y, type: "gear", item, from: e.kind === "normal" ? "monster" : e.kind });
     log(`${e.name}이(가) ${RLItems.itemName(item)}을(를) 떨어뜨렸다!`, null, rarityColor(item));
   }
 
@@ -988,7 +1057,14 @@
     // 적
     for (const e of enemies) {
       if (!visible[e.y][e.x]) continue;
-      drawGlyph(e.ch, e.x * TILE, e.y * TILE, e.color);
+      const px = e.x * TILE, py = e.y * TILE;
+      if (e.kind !== "normal") {
+        // 정예는 금색, 보스는 빨간 테두리로 구분
+        ctx.strokeStyle = e.kind === "boss" ? BOSS_COLOR : ELITE_COLOR;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px + 1, py + 1, TILE - 2, TILE - 2);
+      }
+      drawGlyph(e.ch, px, py, e.color);
     }
 
     // 플레이어
