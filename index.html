@@ -200,6 +200,28 @@
   .dex-card.unknown { opacity: 0.45; }
   .dex-card.here { border-color: var(--accent); }
   #dex-close { width: 100%; margin-top: 12px; }
+
+  /* ---- 상점 ---- */
+  #shop-gold { font-size: 13px; color: var(--accent); }
+  #shop-msg { min-height: 16px; margin: 0 0 8px; font-size: 12px; }
+  .shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 8px; }
+  .shop-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .shop-card h3 { margin: 0; font-size: 13px; }
+  .shop-card .meta { opacity: 0.6; font-size: 11px; }
+  .shop-card .price { margin-top: auto; padding-top: 6px; color: var(--accent); }
+  .shop-card button { margin-top: 4px; }
+  .shop-card.sold { opacity: 0.45; }
+  #shop-close { width: 100%; margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -223,7 +245,7 @@
   <div id="log"></div>
   <p class="hint">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 인벤토리: I &nbsp;·&nbsp; 도감: B &nbsp;·&nbsp; 재시작: R<br>
   계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다. 쓰러진 적이 장비(<b>)</b> 무기, <b>[</b> 방어구)를 떨어뜨리기도 해요.<br>
-  금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고 있어요. 금빛 칸의 황금 고블린을 놓치지 마세요!</p>
+  금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고, 계단 옆 상점(<b>&amp;</b>)에서 골드로 장비를 살 수 있어요. 금빛 칸의 황금 고블린을 놓치지 마세요!</p>
 </div>
 
 <div id="inv-modal" class="overlay" hidden>
@@ -239,6 +261,19 @@
     <div id="inv-bag" class="bag"></div>
     <div id="inv-detail" class="detail"></div>
     <button id="inv-close" type="button">닫기 (I)</button>
+  </div>
+</div>
+
+<div id="shop-modal" class="overlay" hidden>
+  <div class="modal inv" role="dialog" aria-modal="true" aria-labelledby="shop-title">
+    <div class="inv-head">
+      <h2 id="shop-title">상점</h2>
+      <span id="shop-gold"></span>
+    </div>
+    <p class="sub">레어 이상 장비만 팔아요. 진열은 이 층에서만 열려 있어요.</p>
+    <p id="shop-msg"></p>
+    <div id="shop-items" class="shop-grid"></div>
+    <button id="shop-close" type="button">닫기 (Esc)</button>
   </div>
 </div>
 
@@ -525,12 +560,45 @@
         write();
         return true;
       },
-      discard(id) {
+      stones: () => data.stones || 0,
+
+      // 판매: 가방에서 빼고 등급만큼 강화석을 받음
+      sell(id) {
         const i = data.bag.findIndex(x => x.id === id);
-        if (i < 0) return;
+        if (i < 0) return 0;
         const item = data.bag.splice(i, 1)[0];
-        record("discard", item);
+        const gain = RLItems.SELL_STONES[item.rarity];
+        data.stones = (data.stones || 0) + gain;
+        record("sell", item, { stones: gain });
         write();
+        return gain;
+      },
+
+      // 강화: 가방이나 장착 중인 아이템. 실패해도 아이템은 그대로, 강화석만 사라짐
+      // 결과 { ok, to, chance } 또는 { error }
+      enhance(id) {
+        const item = all().find(x => x.id === id);
+        if (!item) return { error: "아이템이 없어요." };
+        const to = (item.enh || 0) + 1;
+        if (to > RLItems.ENHANCE.max) return { error: `+${RLItems.ENHANCE.max}이 최대예요.` };
+        const cost = RLItems.enhanceCost(to);
+        if ((data.stones || 0) < cost) return { error: `강화석이 부족해요. (필요 ${cost}개)` };
+        const result = RLItems.rollEnhance(item);
+        data.stones -= cost;
+        item.tries = (item.tries || 0) + 1;
+        if (result.ok) item.enh = to;
+        record("enhance", item, { to, ok: result.ok, cost, tries: item.tries });
+        write();
+        return result;
+      },
+
+      // 상점 구매: "ok" | "full"
+      buy(item, price) {
+        if (data.bag.length >= BAG_SIZE) return "full";
+        data.bag.push(item);
+        record("buy", item, { price });
+        write();
+        return "ok";
       },
       // 게스트로 모은 장비와 기록을 지금 소유자(계정)로 옮김. 빈 칸이면 장착 상태도 유지
       mergeFrom(other) {
@@ -587,6 +655,8 @@
 
   // ---- 게임 상태 ----
   let map, visible, seen, player, enemies, items, depth, gameOver;
+  let shop = null;       // 상점 칸 { x, y } (5층마다)
+  let shopBought = [];   // 이번 층 상점에서 산 칸 번호
   let bestDepth = 0;
 
   const newRunId = () => randomId().replace(/-/g, "").slice(0, 12);
@@ -611,6 +681,7 @@
   // ---- 몬스터 ---- (규칙과 수치는 monsters.js)
   const { BOSS_COLOR } = RLMonsters;
   const ELITE_COLOR = "#ffcf5c";
+  const SHOP_COLOR = "#5ee7ff";
   const bossAlive = () => enemies.some(e => e.kind === "boss");
 
   // ---- 던전 생성 (방 + 통로) ----
@@ -657,10 +728,12 @@
   }
 
   // ---- 스폰 ----
+  const isShop = (x, y) => !!shop && shop.x === x && shop.y === y;
+
   function randomFloor(exclude) {
     for (let tries = 0; tries < 500; tries++) {
       const x = rnd(MAP_W), y = rnd(MAP_H);
-      if (map[y][x] !== FLOOR) continue;
+      if (map[y][x] !== FLOOR || isShop(x, y)) continue;
       if (exclude && exclude.some(p => p.x === x && p.y === y)) continue;
       return { x, y };
     }
@@ -678,6 +751,14 @@
       if (d > best) { best = d; far = r; }
     }
     map[far.cy][far.cx] = STAIRS;
+
+    // 5층마다 계단 옆에 상점
+    shop = null;
+    if (depth % RLItems.SHOP.every === 0) {
+      const spots = DIRS.map(([dx, dy]) => ({ x: far.cx + dx, y: far.cy + dy })).filter(p => map[p.y][p.x] === FLOOR);
+      shop = spots[rnd(spots.length)] || null;
+      if (shop) log("이 층에는 상점(&)이 있다. 계단 옆에서 골드로 장비를 살 수 있다.", null, SHOP_COLOR);
+    }
 
     // 적 스폰 (층이 깊을수록 강한 종류가 더 자주, 가끔 정예)
     enemies = [];
@@ -701,7 +782,7 @@
       const tiles = [];
       for (let y = far.y; y < far.y + far.h; y++)
         for (let x = far.x; x < far.x + far.w; x++)
-          if (map[y][x] === FLOOR && !enemies.some(e => e.x === x && e.y === y)) tiles.push({ x, y });
+          if (map[y][x] === FLOOR && !isShop(x, y) && !enemies.some(e => e.x === x && e.y === y)) tiles.push({ x, y });
       const spot = tiles.length ? tiles[rnd(tiles.length)] : randomFloor([player, ...enemies]);
       const boss = RLMonsters.makeBoss(depth);
       enemies.push({ ...spot, ...boss });
@@ -773,6 +854,7 @@
     else {
       player.x = nx; player.y = ny;
       pickup();
+      if (isShop(nx, ny)) openShop();
       if (map[ny][nx] === STAIRS) {
         if (!bossAlive()) { descend(); return; }
         log("보스가 살아 있는 동안 계단이 열리지 않는다.", "bad");
@@ -895,6 +977,7 @@
 
   function descend() {
     depth++;
+    shopBought = [];
     bestDepth = Math.max(bestDepth, depth);
     log(`${depth}층으로 내려간다...`, "info");
     const rooms = generateDungeon();
@@ -919,7 +1002,7 @@
       run: gameOver ? null : {
         d: depth, hp: player.hp, mh: player.maxHp, a: player.atk, g: player.gold,
         p: player.potions, l: player.plvl, x: player.xp, xn: player.xpNext,
-        rid: player.rid, k: player.kills, pp: player.potionPicks,
+        rid: player.rid, k: player.kills, pp: player.potionPicks, sb: shopBought,
       },
     };
   }
@@ -971,6 +1054,7 @@
       plvl: r.l, xp: r.x, xpNext: r.xn,
       rid: r.rid || newRunId(), kills: r.k || 0, potionPicks: r.pp || 0,
     };
+    shopBought = Array.isArray(r.sb) ? r.sb : [];
     player.hp = Math.min(player.hp, stats().maxHp);
     logEl.innerHTML = "";
     log(`${depth}층에서 이어서 시작한다.`, "info");
@@ -1120,6 +1204,9 @@
       }
     }
 
+    // 상점
+    if (shop && seen[shop.y][shop.x]) drawGlyph("&", shop.x * TILE, shop.y * TILE, visible[shop.y][shop.x] ? SHOP_COLOR : "#2c6f7a");
+
     // 아이템
     for (const it of items) {
       if (!visible[it.y][it.x]) continue;
@@ -1185,6 +1272,7 @@
       plvl: 1, xp: 0, xpNext: 10,
       rid: newRunId(), kills: 0, potionPicks: 0,
     };
+    shopBought = [];
     player.hp = stats().maxHp;  // 장비로 늘어난 최대 HP까지 채우고 시작
     logEl.innerHTML = "";
     log("던전에 발을 들였다. 계단(>)을 찾아 더 깊이 내려가라.", "info");
@@ -1353,6 +1441,7 @@
   const invDetail = document.getElementById("inv-detail");
   const RARITY_ORDER = ["set", "legendary", "epic", "rare", "uncommon", "common"];
   let selected = null;  // { from: "bag", id } | { from: "equip", slot }
+  let invMsg = null;    // 판매·강화 결과 메시지 { cls, text }
 
   function el(tag, props = {}, ...children) {
     const node = document.createElement(tag);
@@ -1375,7 +1464,7 @@
 
   function renderInventory() {
     const equip = Inv.equipped();
-    document.getElementById("inv-count").textContent = `가방 ${Inv.bag().length}/${BAG_SIZE}`;
+    document.getElementById("inv-count").textContent = `강화석 ${Inv.stones()} · 가방 ${Inv.bag().length}/${BAG_SIZE}`;
 
     invEquip.replaceChildren(...RLItems.SLOTS.map(slot => {
       const item = equip[slot];
@@ -1383,7 +1472,7 @@
       return el("button", {
         type: "button",
         className: `slot${item ? "" : " empty"}${sel ? " sel" : ""}`,
-        onclick: () => { selected = item ? { from: "equip", slot } : null; renderInventory(); },
+        onclick: () => { selected = item ? { from: "equip", slot } : null; invMsg = null; renderInventory(); },
       }, el("small", {}, RLItems.SLOT_NAMES[slot]), item ? itemLabel(item) : "비어 있음");
     }));
 
@@ -1406,7 +1495,7 @@
     invBag.replaceChildren(...(bag.length ? bag.map(item => el("button", {
       type: "button",
       className: `bag-item${selected?.from === "bag" && selected.id === item.id ? " sel" : ""}`,
-      onclick: () => { selected = { from: "bag", id: item.id }; renderInventory(); },
+      onclick: () => { selected = { from: "bag", id: item.id }; invMsg = null; renderInventory(); },
     }, itemLabel(item), el("small", {}, ` · ${RLItems.SLOT_NAMES[item.slot]} Lv${item.lvl}`)))
       : [el("div", { className: "bag-empty" }, "가방이 비어 있어요. 던전에서 몬스터를 쓰러뜨리면 장비를 얻을 수 있어요.")]));
 
@@ -1417,13 +1506,27 @@
     const item = selectedItem();
     if (!item) { invDetail.replaceChildren(el("span", { className: "meta" }, "아이템을 선택하면 자세한 정보가 보여요.")); return; }
     const kind = item.type ? RLItems.WEAPONS[item.type].name : RLItems.SLOT_NAMES[item.slot];
-    const rows = [
+    const enhanced = RLItems.enhancedBase(item);
+    const rows = [];
+    if (invMsg) rows.push(el("div", { className: `msg-${invMsg.cls}` }, invMsg.text));
+    rows.push(
       el("h3", { style: { color: rarityColor(item) } }, RLItems.itemName(item)),
       el("div", { className: "meta" }, `${RLItems.RARITIES[item.rarity].name} · ${kind} · Lv${item.lvl}`),
-      ...Object.entries(item.base).map(([k, v]) => el("div", {}, RLItems.formatStat(k, v))),
+      ...Object.entries(item.base).map(([k, v]) => el("div", {},
+        RLItems.formatStat(k, enhanced[k]),
+        enhanced[k] !== v ? el("span", { className: "meta" }, ` (강화 +${enhanced[k] - v})`) : null)),
       ...item.lines.map(([k, v]) => el("div", { style: { color: rarityColor(item) } }, `◆ ${RLItems.formatStat(k, v)}`)),
-    ];
+    );
     if (item.set) rows.push(el("div", { className: "meta" }, `${RLItems.SETS[item.set].name}: 2·4·6개를 입으면 효과가 켜져요.`));
+
+    const to = (item.enh || 0) + 1;
+    const canEnhance = to <= RLItems.ENHANCE.max;
+    rows.push(el("div", { className: "meta" }, canEnhance
+      ? `다음 강화 +${to}: 성공 ${Math.round(RLItems.enhanceChance(to) * 100)}% · 강화석 ${RLItems.enhanceCost(to)}개 (실패해도 아이템은 그대로)`
+      : `최대 강화(+${RLItems.ENHANCE.max})예요.`));
+    const enhanceBtn = el("button", {
+      type: "button", disabled: !canEnhance || Inv.stones() < RLItems.enhanceCost(to), onclick: () => enhanceItem(item),
+    }, "강화");
 
     const actions = el("div", { className: "row" });
     if (selected.from === "bag") {
@@ -1431,10 +1534,11 @@
       if (current) rows.push(el("div", { className: "meta" }, "장착 중: ", itemLabel(current)));
       actions.append(
         el("button", { type: "button", className: "primary", onclick: () => equipItem(item) }, "장착"),
-        el("button", { type: "button", onclick: () => discardItem(item) }, "버리기"),
+        enhanceBtn,
+        el("button", { type: "button", onclick: () => sellItem(item) }, `판매 (강화석 +${RLItems.SELL_STONES[item.rarity]})`),
       );
     } else {
-      actions.append(el("button", { type: "button", onclick: () => unequipSlot(item.slot) }, "해제"));
+      actions.append(el("button", { type: "button", onclick: () => unequipSlot(item.slot) }, "해제"), enhanceBtn);
     }
     invDetail.replaceChildren(...rows, actions);
   }
@@ -1450,6 +1554,7 @@
   function equipItem(item) {
     Inv.equip(item.id);
     selected = { from: "equip", slot: item.slot };
+    invMsg = null;
     afterGearChange();
   }
 
@@ -1459,16 +1564,29 @@
     afterGearChange();
   }
 
-  function discardItem(item) {
+  function sellItem(item) {
     const rank = RARITY_ORDER.indexOf(item.rarity);
-    if (rank <= RARITY_ORDER.indexOf("rare") && !confirm(`${RLItems.itemName(item)}을(를) 버릴까요? 되돌릴 수 없어요.`)) return;
-    Inv.discard(item.id);
+    const gain = RLItems.SELL_STONES[item.rarity];
+    if (rank <= RARITY_ORDER.indexOf("rare") && !confirm(`${RLItems.itemName(item)}을(를) 강화석 ${gain}개에 판매할까요? 되돌릴 수 없어요.`)) return;
+    Inv.sell(item.id);
     selected = null;
+    invMsg = { cls: "good", text: `${RLItems.itemName(item)} 판매 → 강화석 +${gain}` };
+    afterGearChange();
+  }
+
+  function enhanceItem(item) {
+    const before = RLItems.itemName(item);
+    const r = Inv.enhance(item.id);
+    if (r.error) invMsg = { cls: "bad", text: r.error };
+    else if (r.ok) invMsg = { cls: "good", text: `강화 성공! ${before} → +${r.to}` };
+    else invMsg = { cls: "bad", text: `강화 실패… (+${r.to} 성공 확률 ${Math.round(r.chance * 100)}%) 아이템은 그대로예요.` };
+    if (!r.error) log(invMsg.text, invMsg.cls);
     afterGearChange();
   }
 
   function openInventory() {
     selected = null;
+    invMsg = null;
     invModal.hidden = false;
     renderInventory();
     document.getElementById("inv-close").focus();
@@ -1478,6 +1596,61 @@
   document.getElementById("inv-btn").addEventListener("click", (e) => { e.currentTarget.blur(); openInventory(); });
   document.getElementById("inv-close").addEventListener("click", closeInventory);
   invModal.addEventListener("click", (e) => { if (e.target === invModal) closeInventory(); });
+
+  // ---- 상점 UI ----
+  // 진열품은 (판 ID, 층) 시드로 정해져서 다시 열어도 같고, 산 칸은 판 저장에 남음
+  const shopModal = document.getElementById("shop-modal");
+  const shopMsg = document.getElementById("shop-msg");
+
+  function renderShop() {
+    document.getElementById("shop-gold").textContent = `보유 골드 ${player.gold}`;
+    const stock = RLItems.shopStock(player.rid, depth);
+    document.getElementById("shop-items").replaceChildren(...stock.map((item, i) => {
+      const price = RLItems.shopPrice(item);
+      const sold = shopBought.includes(i);
+      const kind = item.type ? RLItems.WEAPONS[item.type].name : RLItems.SLOT_NAMES[item.slot];
+      return el("div", { className: `shop-card${sold ? " sold" : ""}` },
+        el("h3", { style: { color: rarityColor(item) } }, RLItems.itemName(item)),
+        el("span", { className: "meta" }, `${RLItems.RARITIES[item.rarity].name} · ${kind} · Lv${item.lvl}`),
+        ...Object.entries(item.base).map(([k, v]) => el("span", {}, RLItems.formatStat(k, v))),
+        ...item.lines.map(([k, v]) => el("span", { style: { color: rarityColor(item) } }, `◆ ${RLItems.formatStat(k, v)}`)),
+        el("span", { className: "price" }, sold ? "판매 완료" : `${price} 골드`),
+        sold ? null : el("button", {
+          type: "button", className: "primary", disabled: player.gold < price, onclick: () => buyItem(i),
+        }, player.gold < price ? "골드 부족" : "구매"));
+    }));
+  }
+
+  function buyItem(i) {
+    if (shopBought.includes(i)) return;
+    const item = RLItems.shopStock(player.rid, depth)[i];
+    const price = RLItems.shopPrice(item);
+    if (player.gold < price) return;
+    if (Inv.buy(item, price) === "full") {
+      shopMsg.className = "msg-bad";
+      shopMsg.textContent = "가방이 가득 찼어요. 인벤토리에서 판매해 공간을 만들어 주세요.";
+      return;
+    }
+    player.gold -= price;
+    shopBought.push(i);
+    shopMsg.className = "msg-good";
+    shopMsg.textContent = `${RLItems.itemName(item)}을(를) ${price} 골드에 샀어요.`;
+    log(`상점에서 ${RLItems.itemName(item)}을(를) 샀다. (-${price} 골드)`, null, rarityColor(item));
+    updateStats();
+    saveGame();
+    renderShop();
+  }
+
+  function openShop() {
+    shopMsg.textContent = "";
+    shopModal.hidden = false;
+    renderShop();
+    document.getElementById("shop-close").focus();
+  }
+  function closeShop() { shopModal.hidden = true; }
+
+  document.getElementById("shop-close").addEventListener("click", closeShop);
+  shopModal.addEventListener("click", (e) => { if (e.target === shopModal) closeShop(); });
 
   // ---- 도감 UI ----
   // 한 번이라도 본 몬스터만 능력치를 보여줌. 수치는 monsters.js에서 그대로 읽음
@@ -1557,6 +1730,10 @@
 
   // ---- 입력 ----
   window.addEventListener("keydown", (e) => {
+    if (!shopModal.hidden) {
+      if (e.key === "Escape") { e.preventDefault(); closeShop(); }
+      return;
+    }
     if (!dexModal.hidden) {
       if (e.key === "Escape" || e.key.toLowerCase() === "b") { e.preventDefault(); closeDex(); }
       return;

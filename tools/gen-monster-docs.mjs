@@ -84,7 +84,29 @@ ${table(["어디서", "확률", "등급 확률"], [
   ["정예", pct(I.DROPS.elite.chance), tableRates(I.TABLES.drop)],
   ["보스", pct(I.DROPS.boss.chance), tableRates(I.TABLES.boss)],
   ["황금 고블린", `${pct(I.DROPS.golden.chance)} × ${G.drops}개`, tableRates(I.TABLES.golden)],
+  [`상점 (${I.SHOP.every}층마다, 골드)`, `진열 ${I.SHOP.slots}개`, tableRates(I.TABLES[I.SHOP.table])],
   ["장비 상자 (캐시)", "-", tableRates(I.TABLES.box)],
+])}
+
+## 상점
+
+- ${I.SHOP.every}층마다 계단 옆 \`&\` 칸. 밟으면 열려요
+- 황금 고블린과 같은 등급표로 ${I.SHOP.slots}개를 진열해요. 진열품은 (판 ID, 층)으로 정해져서 다시 열어도 같아요
+- 가격: 등급 기본값 × (1 + 아이템 레벨당 10%), 5골드 단위
+
+${table(["등급", "기본 가격", "5층", "10층", "20층"],
+  Object.keys(I.SHOP.prices).map(r => [I.RARITIES[r].name, I.SHOP.prices[r], ...[5, 10, 20].map(l => I.shopPrice({ rarity: r, lvl: l }))]))}
+
+## 판매와 강화
+
+- 판매하면 등급에 따라 강화석을 받아요: ${Object.entries(I.SELL_STONES).map(([r, n]) => `${I.RARITIES[r].name} ${n}`).join(", ")}
+- +N으로 강화할 때 강화석 N개가 들어요. 실패해도 아이템과 강화 단계는 그대로이고 강화석만 사라져요
+- 강화 1단계마다 기본 능력치가 +10% 올라요 (능력치마다 최소 +1). 추가 능력치 줄은 그대로예요
+- 결과는 (아이템 ID, 몇 번째 시도)로 정해져서 새로고침해도 바뀌지 않아요
+
+${table(["강화", ...Array.from({ length: I.ENHANCE.max }, (_, i) => `+${i + 1}`)], [
+  ["성공 확률", ...Array.from({ length: I.ENHANCE.max }, (_, i) => pct(I.enhanceChance(i + 1)))],
+  ["강화석", ...Array.from({ length: I.ENHANCE.max }, (_, i) => I.enhanceCost(i + 1))],
 ])}
 `;
 
