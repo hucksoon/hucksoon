@@ -737,14 +737,16 @@
     log(`${e.name}이(가) ${RLItems.itemName(item)}을(를) 떨어뜨렸다!`, null, rarityColor(item));
   }
 
-  // 포션을 주울 때도 몬스터와 같은 확률로 장비가 나옴. 시드는 (판 ID, 층, 포션 순번)
+  // 포션 자리(!)에서는 몬스터와 같은 확률로 장비가, 아니면 포션이 나옴. 시드는 (판 ID, 층, 포션 자리 순번)
+  // 장비가 나오면 true
   function potionLoot() {
     const seed = `${player.rid}|d${depth}|p${player.potionPicks++}`;
     const item = RLItems.rollDrop(seed, depth);
-    if (!item) return;
-    log(`포션과 함께 ${RLItems.itemName(item)}을(를) 발견했다!`, null, rarityColor(item));
+    if (!item) return false;
+    log(`포션 대신 ${RLItems.itemName(item)}을(를) 발견했다!`, null, rarityColor(item));
     const gear = { x: player.x, y: player.y, type: "gear", item, from: "potion" };
     if (!takeGear(gear)) items.push(gear);  // 가방이 가득 차면 바닥에 남김
+    return true;
   }
 
   // 가방에 넣으면 true, 가방이 가득 차서 못 넣으면 false
@@ -773,9 +775,10 @@
       if (it.type === "gear") {
         if (!takeGear(it)) continue;
       } else if (it.type === "potion") {
-        player.potions++;
-        log("포션을 주웠다. (Q로 사용)", "info");
-        potionLoot();
+        if (!potionLoot()) {
+          player.potions++;
+          log("포션을 주웠다. (Q로 사용)", "info");
+        }
       } else if (it.type === "gold") {
         const amount = Math.round(it.amount * (1 + stats().gold / 100));
         player.gold += amount;
