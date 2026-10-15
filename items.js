@@ -163,11 +163,49 @@
     return rng() < chance ? generate(seed, table, level) : null;
   }
 
+  // ---- 판매 / 강화 ----
+  // 판매하면 등급에 따라 강화석을 줌
+  const SELL_STONES = { common: 1, uncommon: 2, rare: 4, epic: 8, legendary: 16, set: 12 };
+
+  // +N으로 강화할 때: 강화석 N개. +4까지는 항상 성공, +5는 50%, 이후 10%p씩 낮아져 최저 5%.
+  // 실패해도 장비와 강화 단계는 그대로이고 강화석만 사라짐. 강화 1단계마다 기본 능력치 +10% (최소 +1)
+  const ENHANCE = { max: 10, statPerLevel: 0.1 };
+  const enhanceCost = (to) => to;
+  const enhanceChance = (to) => (to <= 4 ? 1 : Math.max(0.05, 0.5 - (to - 5) * 0.1));
+
+  // 강화 결과는 (아이템 ID, 몇 번째 시도) 시드로 정해짐 → 새로고침해도 같은 결과, 서버에서 다시 계산 가능
+  function rollEnhance(item) {
+    const to = (item.enh || 0) + 1;
+    const rng = rngFrom(`v${RULES_VERSION}|enh|${item.id}|${item.tries || 0}`);
+    return { to, chance: enhanceChance(to), ok: rng() < enhanceChance(to) };
+  }
+
+  // 강화가 반영된 기본 능력치 (추가 능력치 줄은 그대로)
+  function enhancedBase(item) {
+    const n = item.enh || 0;
+    const out = {};
+    for (const [k, v] of Object.entries(item.base)) out[k] = v + Math.max(n, Math.round(v * ENHANCE.statPerLevel * n));
+    return out;
+  }
+
+  // ---- 상점 ----
+  // 5층마다 계단 방에 열림. 황금 고블린과 같은 등급표(레어 이상)로 6개를 진열, 골드로 구매
+  const SHOP = { every: 5, slots: 6, table: "golden", prices: { rare: 60, epic: 150, legendary: 400, set: 300 } };
+
+  // 진열품은 (판 ID, 층, 칸 번호) 시드로 정해짐
+  function shopStock(runId, depth) {
+    return Array.from({ length: SHOP.slots }, (_, i) => generate(`${runId}|shop|d${depth}|s${i}`, SHOP.table, depth));
+  }
+
+  // 가격: 등급 기본값 × (1 + 아이템 레벨당 10%), 5골드 단위
+  const shopPrice = (item) => Math.round(SHOP.prices[item.rarity] * (1 + (item.lvl - 1) * 0.1) / 5) * 5;
+
   // ---- 표시 ----
   function itemName(item) {
-    if (item.set) return SETS[item.set].pieces[item.slot];
+    const plus = item.enh ? `+${item.enh} ` : "";
+    if (item.set) return plus + SETS[item.set].pieces[item.slot];
     const base = item.type ? WEAPONS[item.type].name : ARMOR[item.slot].name;
-    return `${RARITIES[item.rarity].name} ${base}`;
+    return `${plus}${RARITIES[item.rarity].name} ${base}`;
   }
 
   function formatStat(stat, value) {
@@ -181,7 +219,7 @@
     const setCounts = {};
     for (const item of equipped) {
       if (!item) continue;
-      for (const [k, v] of Object.entries(item.base)) sum[k] += v;
+      for (const [k, v] of Object.entries(enhancedBase(item))) sum[k] += v;
       for (const [k, v] of item.lines) sum[k] += v;
       if (item.set) setCounts[item.set] = (setCounts[item.set] || 0) + 1;
     }
@@ -197,7 +235,9 @@
 
   const api = {
     RULES_VERSION, SLOTS, SLOT_NAMES, WEAPONS, ARMOR, RARITIES, TABLES, DROPS, DROP_CHANCE, STATS, SETS,
+    SELL_STONES, ENHANCE, SHOP,
     rngFrom, generate, rollDrop, itemName, formatStat, totals,
+    enhanceCost, enhanceChance, rollEnhance, enhancedBase, shopStock, shopPrice,
   };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.RLItems = api;
