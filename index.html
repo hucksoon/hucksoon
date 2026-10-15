@@ -273,6 +273,7 @@
     <button id="account-btn" type="button"></button>
     <button id="inv-btn" type="button">인벤토리 (I)</button>
     <button id="dex-btn" type="button">도감 (B)</button>
+    <a id="shop-btn" class="btn" href="shop.html">상점</a>
     <a id="rank-btn" class="btn" href="ranking.html" target="_blank" rel="noopener">랭킹</a>
     <button id="restart-btn" class="keys-only" type="button">재시작 (R)</button>
   </div>
@@ -681,6 +682,29 @@
         write();
         return "ok";
       },
+      // 상점에서 연 장비 상자의 아이템을 보관함(rl_mail)에서 가방으로. 가방이 차면 남은 건 보관함에 그대로
+      // 결과 { moved, left }
+      collectMail() {
+        const mailKey = `rl_mail:${owner}`;
+        let mail;
+        try { mail = JSON.parse(store.get(mailKey)) || []; } catch { mail = []; }
+        if (!mail.length) return { moved: 0, left: 0 };
+        let moved = 0;
+        const left = [];
+        for (const m of mail) {
+          if (all().some(x => x.id === m.item.id)) continue;  // 이미 받은 아이템
+          if (data.bag.length >= BAG_SIZE) { left.push(m); continue; }
+          data.bag.push(m.item);
+          record("get", m.item, { from: m.from || "box", order: m.order, sku: m.sku });
+          moved++;
+        }
+        write();
+        if (left.length) store.set(mailKey, JSON.stringify(left)); else store.del(mailKey);
+        return { moved, left: left.length };
+      },
+      mailCount() {
+        try { return (JSON.parse(store.get(`rl_mail:${owner}`)) || []).length; } catch { return 0; }
+      },
       // 게스트로 모은 장비와 기록을 지금 소유자(계정)로 옮김. 빈 칸이면 장착 상태도 유지
       mergeFrom(other) {
         if (other === owner) return 0;
@@ -787,6 +811,13 @@
     }
     return { schedule };
   })();
+
+  // 상점에서 연 상자의 장비: 보관함 → 가방 (가방이 차면 자리가 날 때까지 보관함에서 기다림)
+  function collectMail(announceLeft = false) {
+    const r = Inv.collectMail();
+    if (r.moved) { log(`상점 상자에서 나온 장비 ${r.moved}개를 가방에 넣었다.`, "good"); Ranking.schedule(); }
+    if (r.left && (r.moved || announceLeft)) log(`가방이 가득 차서 ${r.left}개는 보관함에서 기다린다. 가방을 비우면 들어온다.`, "info");
+  }
 
   // ---- 게임 상태 ----
   let map, visible, seen, player, enemies, items, depth, gameOver;
@@ -1225,6 +1256,7 @@
         log("지금 진행 상황을 계정에 저장했다.", "good");
       }
       cloudReady = true;
+      collectMail(true);
       Ranking.schedule();
     } catch (e) {
       log(`계정 저장 데이터를 불러오지 못했다: ${e.message}`, "bad");
@@ -1442,6 +1474,7 @@
   const codeInput = document.getElementById("login-code");
   const loginMsg = document.getElementById("login-msg");
   let loginKind = "email", loginValue = "", operationId = null;
+  let loginReturn = null;  // 로그인 뒤 돌아갈 페이지 (상점에서 ?login=shop 으로 왔을 때)
 
   function renderAccount() {
     const guest = `게스트 #${Account.deviceId().slice(0, 6)} 로 플레이 중`;
@@ -1544,6 +1577,8 @@
         const moved = Inv.mergeFrom(guestOwner);
         if (moved) log(`게스트 장비 ${moved}개를 계정으로 옮겼다.`, "good");
         await syncAfterLogin();
+        // 상점에서 "계정 연결하기"로 왔으면 저장을 마치고 상점으로 돌아감
+        if (loginReturn) { await flushCloud(); location.href = loginReturn; }
       } catch (err) {
         // 코드는 1회용이라 실패하면 새 코드를 받아야 할 수 있음
         setMsg(`${err.message} 코드가 만료됐다면 '다시 입력'으로 새 코드를 받아 주세요.`, "err");
@@ -1612,8 +1647,11 @@
   }
 
   function renderInventory() {
+    collectMail();
     const equip = Inv.equipped();
-    document.getElementById("inv-count").textContent = `강화석 ${Inv.stones()} · 가방 ${Inv.bag().length}/${BAG_SIZE}`;
+    const waiting = Inv.mailCount();
+    document.getElementById("inv-count").textContent =
+      `강화석 ${Inv.stones()} · 가방 ${Inv.bag().length}/${BAG_SIZE}${waiting ? ` · 보관함 ${waiting}` : ""}`;
 
     invEquip.replaceChildren(...RLItems.SLOTS.map(slot => {
       const item = equip[slot];
@@ -2003,8 +2041,15 @@
   Dex.use(inventoryOwner());
   startFromSave(parseSave(store.get(SAVE_KEY)));
   renderAccount();
+  collectMail(true);
   if (Account.configured() && Account.loggedIn()) syncAfterLogin();
   else Ranking.schedule();
+  // 상점의 "계정 연결하기": 이미 로그인했으면 바로 상점으로, 아니면 로그인 창
+  if (new URLSearchParams(location.search).get("login") === "shop") {
+    history.replaceState(null, "", location.pathname);
+    if (Account.loggedIn()) location.replace("shop.html");
+    else if (Account.configured()) { loginReturn = "shop.html"; openLogin(); }
+  }
 })();
 </script>
 </body>
