@@ -50,6 +50,19 @@
     xp: (d) => 10 + d * 4,
   };
 
+  // 골드: 바닥의 골드 더미와 몬스터 처치로 얻음. 층이 깊을수록 많아짐 (층 배율 = 1 + 0.25 × (층 − 1))
+  // 범위 [최소, 최대]에서 무작위로 정한 뒤 층 배율을 곱함. 장비의 "골드 획득 +%"는 그 위에 더해짐
+  const GOLD = {
+    perFloor: 0.25,
+    piles: { count: [2, 4], amount: [3, 12] },
+    kill: { normal: [1, 3], elite: [10, 20], boss: [80, 120], golden: [30, 50] },
+  };
+  const goldMultiplier = (d) => 1 + GOLD.perFloor * (d - 1);
+  function rollGold(range, d, rand) {
+    const [lo, hi] = range;
+    return Math.round((lo + Math.floor(rand() * (hi - lo + 1))) * goldMultiplier(d));
+  }
+
   function pool(d) {
     return MONSTERS.filter(m => d >= m.from && d <= (m.until ?? Infinity));
   }
@@ -111,8 +124,9 @@
   }
 
   const api = {
-    MONSTERS, ELITE, BOSSES, BOSS_EVERY, BOSS_SCALE, BOSS_COLOR, GOLDEN,
+    MONSTERS, ELITE, BOSSES, BOSS_EVERY, BOSS_SCALE, BOSS_COLOR, GOLDEN, GOLD,
     pool, spawnRates, pickType, eliteChance, makeMonster, isBossFloor, makeBoss, makeGolden,
+    goldMultiplier, rollGold,
   };
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.RLMonsters = api;
