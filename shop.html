@@ -130,7 +130,10 @@
   .methods { display: flex; flex-direction: column; gap: 6px; }
   .method { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; background: var(--row); }
   .method img { width: 40px; height: 26px; object-fit: contain; background: #fff; border-radius: 4px; padding: 2px; }
-  .method .rec { margin-left: auto; font-size: 11px; color: var(--accent); }
+  .method-search { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+  .method-search:focus { outline: none; border-color: var(--accent); }
+  .more-methods { width: 100%; margin-top: 8px; color: var(--muted); }
+  psdk-submit-button psdk-default-submit-button button { max-width: none; height: 44px; font-weight: bold; font-size: 15px; }
 
   .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
   .fields > * { grid-column: span 2; min-width: 0; }
@@ -258,6 +261,7 @@
       loading: "불러오는 중…", creating: "주문을 만드는 중…", noMethods: "쓸 수 있는 결제 수단이 없어요.",
       unsupported: "이 결제 수단은 아직 지원하지 않아요. 다른 결제 수단을 골라 주세요.",
       continue: "계속하기", waiting: "결제를 확인하는 중…",
+      moreMethods: (n) => `결제 수단 더 보기 (${n})`, searchMethods: "결제 수단 검색", noMatch: "찾는 결제 수단이 없어요.",
       paid: (n) => `결제 완료! 캐시 ${n}이 들어왔어요.`, paidNoAmount: "결제 완료! 캐시가 들어왔어요.",
       payFailed: "결제가 완료되지 않았어요. 다시 시도해 주세요.",
       boxTitleN: (n) => `장비 상자 ${n}회`, opening: "상자를 여는 중…",
@@ -284,6 +288,7 @@
       loading: "Loading…", creating: "Creating your order…", noMethods: "No payment methods are available.",
       unsupported: "This payment method isn't supported yet. Please choose another one.",
       continue: "Continue", waiting: "Confirming your payment…",
+      moreMethods: (n) => `More payment methods (${n})`, searchMethods: "Search payment methods", noMatch: "No matching payment method.",
       paid: (n) => `Payment complete! ${n} Cash added.`, paidNoAmount: "Payment complete! Cash added.",
       payFailed: "The payment was not completed. Please try again.",
       boxTitleN: (n) => `Equipment box x${n}`, opening: "Opening the box…",
@@ -310,6 +315,7 @@
       loading: "読み込み中…", creating: "注文を作成中…", noMethods: "利用できるお支払い方法がありません。",
       unsupported: "このお支払い方法はまだ対応していません。別の方法を選んでください。",
       continue: "続ける", waiting: "お支払いを確認中…",
+      moreMethods: (n) => `その他のお支払い方法 (${n})`, searchMethods: "お支払い方法を検索", noMatch: "該当するお支払い方法がありません。",
       paid: (n) => `お支払い完了！キャッシュ ${n} が追加されました。`, paidNoAmount: "お支払い完了！キャッシュが追加されました。",
       payFailed: "お支払いが完了しませんでした。もう一度お試しください。",
       boxTitleN: (n) => `装備ボックス ${n}回`, opening: "ボックスを開けています…",
@@ -612,7 +618,8 @@
 
   // 카드 입력칸은 Xsolla iframe 안에 있어서 바깥 CSS가 닿지 않음 → 따로 전달
   const SECURE_CSS = `
-    input { background: #0d0e14; color: #cdd3de; font-family: "Courier New", monospace; font-size: 16px; }
+    input { background: #0d0e14; color: #cdd3de; font-family: "Courier New", monospace; font-size: 16px;
+            border: 0; outline: 0; width: 100%; height: 100%; padding: 0 10px; box-sizing: border-box; }
     input::placeholder { color: #5d6474; }
   `;
 
@@ -685,23 +692,41 @@
 
   const ICON_BASE = "https://cdn.xsolla.net/headless-checkout-prod/assets/icons";
   function methodIcon(m) {
-    const img = el("img", { alt: "", loading: "lazy", src: m.iconName ? `${ICON_BASE}/brand-logos/${m.iconName}` : `${ICON_BASE}/default-payment-icons/default.svg` });
+    const img = el("img", { alt: "", src: m.iconName ? `${ICON_BASE}/brand-logos/${m.iconName}` : `${ICON_BASE}/default-payment-icons/default.svg` });
     img.onerror = () => { if (!img.dataset.fallback) { img.dataset.fallback = 1; img.src = `${ICON_BASE}/default-payment-icons/default.svg`; } else img.remove(); };
     return img;
   }
 
+  // 결제 수단: 나라별 순위(rank)대로 상위 몇 개만 먼저, 나머지는 "더 보기"와 검색으로
+  const TOP_METHODS = 6;
   async function showMethods() {
     resetPayView();
     $("pay-methods").append(el("div", { className: "loader", textContent: t("loading") }));
     let methods = [];
     try { methods = await sdk.getRegularMethods({}); } catch {}
+    methods = [...methods].sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
     const list = el("div", { className: "methods" });
-    for (const m of methods) {
-      list.append(el("button", { type: "button", className: "method", onclick: () => selectMethod(m) },
-        methodIcon(m), el("span", { textContent: m.name }), m.recommended ? el("span", { className: "rec", textContent: "★" }) : null));
+    const button = (m) => el("button", { type: "button", className: "method", onclick: () => selectMethod(m) }, methodIcon(m), el("span", { textContent: m.name }));
+    const draw = (items) => list.replaceChildren(...(items.length ? items.map(button) : [el("div", { className: "msg info", textContent: t("noMatch") })]));
+    draw(methods.slice(0, TOP_METHODS));
+    const parts = [el("div", { className: "step-title", textContent: t("chooseMethod") })];
+    if (!methods.length) parts.push(el("div", { className: "msg info", textContent: t("noMethods") }));
+    else {
+      parts.push(list);
+      if (methods.length > TOP_METHODS) {
+        const search = el("input", { type: "search", className: "method-search", placeholder: t("searchMethods"), hidden: true });
+        search.addEventListener("input", () => {
+          const q = search.value.trim().toLowerCase();
+          draw(q ? methods.filter(m => `${m.name},${m.aliases || ""}`.toLowerCase().includes(q)) : methods);
+        });
+        const more = el("button", { type: "button", className: "more-methods", textContent: t("moreMethods", methods.length - TOP_METHODS), onclick: () => {
+          more.remove(); search.hidden = false; draw(methods); search.focus();
+        } });
+        parts.splice(1, 0, search);
+        parts.push(more);
+      }
     }
-    $("pay-methods").replaceChildren(el("div", { className: "step-title", textContent: t("chooseMethod") }),
-      methods.length ? list : el("div", { className: "msg info", textContent: t("noMethods") }));
+    $("pay-methods").replaceChildren(...parts);
   }
 
   function returnUrl() {
@@ -739,7 +764,8 @@
     box.replaceChildren(el("div", { className: "loader", textContent: t("loading") }));
     const holder = el("div", { className: "fields", hidden: true });
     const mounted = [];
-    for (const f of fields || []) {
+    const rank = (f) => f.name === "card_number" ? 0 : /exp/i.test(f.name) ? 1 : /cvv|cvc/i.test(f.name) ? 2 : f.type === "check" ? 9 : 5;
+    for (const f of [...(fields || [])].sort((a, b) => rank(a) - rank(b))) {
       let node;
       if (f.name === "card_number") node = el("psdk-card-number");
       else if (f.name === "phone") node = el("psdk-phone");
