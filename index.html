@@ -85,7 +85,7 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 16px;
+      gap: 10px;
       width: 640px;
       max-width: 100%;
       user-select: none;
@@ -95,19 +95,16 @@
     .keys-only { display: none; }
   }
   #touch-pad button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-  .dpad {
-    display: grid;
-    grid-template-columns: repeat(3, 56px);
-    grid-template-rows: repeat(3, 52px);
-    gap: 4px;
-    grid-template-areas: ". up ." "left . right" ". down .";
-  }
-  .dpad button { font-size: 20px; padding: 0; }
+  .dpad { display: flex; flex-direction: column; gap: 8px; flex: none; }
+  .dpad button { width: 68px; height: 68px; font-size: 24px; padding: 0; }
   .dpad button:active, .dpad button.held { background: var(--border); color: var(--accent); }
-  .dpad .up { grid-area: up; } .dpad .down { grid-area: down; }
-  .dpad .left { grid-area: left; } .dpad .right { grid-area: right; }
-  .actions { display: grid; grid-template-columns: repeat(2, minmax(84px, 1fr)); gap: 6px; flex: 1; max-width: 220px; }
-  .actions button { padding: 12px 6px; font-size: 14px; }
+  .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; flex: 1; max-width: 260px; }
+  .actions button { padding: 12px 4px; font-size: 14px; white-space: nowrap; }
+  /* 폭이 좁은 휴대폰(iPhone SE 등): 버튼을 조금 줄여 글자가 한 줄에 들어가게 */
+  @media (max-width: 360px) {
+    .dpad button { width: 62px; height: 62px; }
+    .actions button { font-size: 12px; padding: 12px 2px; }
+  }
 
   .msg-hit { color: #ff8f6b; }
   .msg-good { color: #7be08a; }
@@ -278,17 +275,20 @@
   </div>
   <canvas id="game" width="640" height="480"></canvas>
   <div id="touch-pad" aria-label="터치 조작">
-    <div class="dpad">
+    <!-- 양손 엄지로 누르기 좋게: 왼쪽 ▲◀, 가운데 기능 버튼, 오른쪽 ▶▼ -->
+    <div class="dpad dpad-left">
       <button type="button" class="up" data-dir="0,-1" aria-label="위로">▲</button>
       <button type="button" class="left" data-dir="-1,0" aria-label="왼쪽으로">◀</button>
-      <button type="button" class="right" data-dir="1,0" aria-label="오른쪽으로">▶</button>
-      <button type="button" class="down" data-dir="0,1" aria-label="아래로">▼</button>
     </div>
     <div class="actions">
       <button type="button" id="tp-potion">포션</button>
       <button type="button" id="tp-inv">인벤토리</button>
       <button type="button" id="tp-dex">도감</button>
       <button type="button" id="tp-restart">재시작</button>
+    </div>
+    <div class="dpad dpad-right">
+      <button type="button" class="right" data-dir="1,0" aria-label="오른쪽으로">▶</button>
+      <button type="button" class="down" data-dir="0,1" aria-label="아래로">▼</button>
     </div>
   </div>
   <div id="log"></div>
@@ -1868,7 +1868,7 @@
   let holdTimer = null;
   const stopHold = () => { clearTimeout(holdTimer); clearInterval(holdTimer); holdTimer = null; };
 
-  for (const btn of pad.querySelectorAll(".dpad button")) {
+  for (const btn of pad.querySelectorAll("[data-dir]")) {
     const [dx, dy] = btn.dataset.dir.split(",").map(Number);
     const step = () => { if (!anyModalOpen()) tryMove(dx, dy); };
     btn.addEventListener("pointerdown", (e) => {
