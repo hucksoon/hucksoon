@@ -266,6 +266,7 @@
     <button id="account-btn" type="button"></button>
     <button id="inv-btn" type="button">인벤토리 (I)</button>
     <button id="dex-btn" type="button">도감 (B)</button>
+    <button id="restart-btn" class="keys-only" type="button">재시작 (R)</button>
   </div>
   <div id="stats">
     <span>층 <b id="depth">1</b> (최고 <span id="best">0</span>)</span>
@@ -1886,11 +1887,13 @@
   document.getElementById("tp-potion").addEventListener("click", usePotion);
   document.getElementById("tp-inv").addEventListener("click", openInventory);
   document.getElementById("tp-dex").addEventListener("click", openDex);
-  // 키보드 R과 달리 버튼은 실수로 누르기 쉬워서 진행 중이면 한 번 더 확인
-  document.getElementById("tp-restart").addEventListener("click", () => {
+  // 재시작: 진행 중이면 한 번 더 확인 (죽은 뒤에는 바로). R 키, 위쪽 버튼, 터치 버튼이 모두 같은 동작
+  function restart() {
     if (!gameOver && !confirm("새로 시작할까요? 지금 판의 층, 골드, 레벨이 사라져요. 장비는 남아요.")) return;
     newGame();
-  });
+  }
+  document.getElementById("tp-restart").addEventListener("click", restart);
+  document.getElementById("restart-btn").addEventListener("click", (e) => { e.currentTarget.blur(); restart(); });
 
   // ---- 입력 ----
   window.addEventListener("keydown", (e) => {
@@ -1919,7 +1922,7 @@
       case "arrowright": case "d": tryMove(1, 0); break;
       case " ":                    wait(); break;
       case "q":                    usePotion(); break;
-      case "r":                    newGame(); break;
+      case "r":                    restart(); break;
       default: handled = false;
     }
     if (handled) e.preventDefault();
