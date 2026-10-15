@@ -82,13 +82,83 @@
   .msg-good { color: #7be08a; }
   .msg-bad { color: #ff6b6b; }
   .msg-info { color: #6bd3ff; }
+
+  /* ---- 계정 ---- */
+  #account {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+  }
+  #account-status { opacity: 0.8; }
+  button {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a1406; font-weight: bold; }
+  button.primary:hover:not(:disabled) { color: #1a1406; filter: brightness(1.08); }
+
+  #login-modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.7);
+  }
+  #login-modal[hidden] { display: none; }
+  .modal {
+    width: 360px;
+    max-width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+  }
+  .modal h2 { margin: 0 0 6px; font-size: 17px; color: var(--accent); }
+  .modal .sub { margin: 0 0 14px; font-size: 12px; line-height: 1.5; opacity: 0.7; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .tabs button { flex: 1; }
+  .tabs button.on { border-color: var(--accent); color: var(--accent); }
+  .modal form { display: flex; flex-direction: column; gap: 8px; }
+  .modal form[hidden] { display: none; }
+  .modal label { font-size: 12px; opacity: 0.7; }
+  .modal input {
+    font: inherit;
+    font-size: 15px;
+    color: #fff;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 10px;
+  }
+  .modal input:focus { outline: none; border-color: var(--accent); }
+  .modal .row { display: flex; gap: 8px; }
+  .modal .row button { flex: 1; }
+  #login-msg { min-height: 18px; margin: 10px 0 0; font-size: 12px; }
+  #login-msg.err { color: #ff6b6b; }
+  #login-msg.ok { color: #7be08a; }
+  #login-close { width: 100%; margin-top: 10px; }
 </style>
 </head>
 <body>
 <div id="app">
   <h1>⚔ 던전 크롤러 ⚔</h1>
+  <div id="account">
+    <span id="account-status"></span>
+    <button id="account-btn" type="button"></button>
+  </div>
   <div id="stats">
-    <span>층 <b id="depth">1</b></span>
+    <span>층 <b id="depth">1</b> (최고 <span id="best">0</span>)</span>
     <span class="hp">HP <b id="hp">--</b></span>
     <span>공격 <b id="atk">--</b></span>
     <span class="gold">골드 <b id="gold">0</b></span>
@@ -98,6 +168,32 @@
   <div id="log"></div>
   <p class="hint">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 재시작: R<br>
   계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다.</p>
+</div>
+
+<div id="login-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+    <h2 id="login-title">계정 연결</h2>
+    <p class="sub">받은 인증 코드를 입력하면 어느 기기에서든 진행 상황을 이어서 플레이할 수 있어요. 지금 게스트 진행 상황은 계정으로 옮겨져요.</p>
+    <div class="tabs">
+      <button type="button" data-kind="email" class="on">이메일</button>
+      <button type="button" data-kind="phone">휴대폰</button>
+    </div>
+    <form id="step-id">
+      <label for="login-id" id="login-id-label">이메일</label>
+      <input id="login-id" type="email" autocomplete="email" required>
+      <button class="primary" type="submit">인증 코드 받기</button>
+    </form>
+    <form id="step-code" hidden>
+      <label for="login-code" id="login-code-label">인증 코드</label>
+      <input id="login-code" inputmode="numeric" autocomplete="one-time-code" required>
+      <div class="row">
+        <button type="button" id="login-back">다시 입력</button>
+        <button class="primary" type="submit">확인</button>
+      </div>
+    </form>
+    <p id="login-msg"></p>
+    <button id="login-close" type="button">닫기</button>
+  </div>
 </div>
 
 <script>
@@ -120,8 +216,171 @@
   const between = (lo, hi) => lo + rnd(hi - lo + 1);
   const dist = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
+  // ---- Xsolla Login 설정 ----
+  // Publisher Account → Players → Login 에서 복사해 넣으세요. 공개 값이라 클라이언트에 있어도 됩니다.
+  // 두 값이 비어 있으면 계정 기능은 꺼지고 게스트로만 플레이합니다.
+  const XSOLLA = {
+    loginProjectId: "",                                   // Login 프로젝트 UUID
+    clientId: "",                                         // OAuth 2.0 public 클라이언트 ID (숫자)
+    publisherProjectId: 317991,                           // 퍼블리셔 프로젝트 ID
+    redirectUri: "https://hucksoon.github.io/hucksoon/",  // PA의 redirect URI와 정확히 같아야 함
+  };
+  const LOGIN_API = "https://login.xsolla.com/api";
+  const SAVE_KEY = "rl_save";          // 로컬 저장 키
+  const SAVE_ATTR = "roguelike_save";  // 계정 속성(attribute) 키
+
+  // localStorage는 사생활 보호 모드 등에서 예외를 던질 수 있음
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+    del(k) { try { localStorage.removeItem(k); } catch {} },
+  };
+  const randomId = () => (crypto.randomUUID ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join(""));
+
+  // ---- 계정 (Xsolla Login, OAuth 2.0 + 이메일/휴대폰 인증 코드) ----
+  const Account = (() => {
+    const AUTH_KEY = "rl_auth";
+    let auth = null;   // { access, refresh, exp }
+    let state = null;  // 인증 요청 1회분의 CSRF state
+    try { auth = JSON.parse(store.get(AUTH_KEY)); } catch {}
+
+    const configured = () => !!(XSOLLA.loginProjectId && XSOLLA.clientId);
+
+    // 게스트 식별용 기기 ID: 처음 접속 때 만든 무작위 UUID
+    function deviceId() {
+      let id = store.get("rl_device_id");
+      if (!id) { id = randomId(); store.set("rl_device_id", id); }
+      return id;
+    }
+
+    async function call(path, { method = "POST", json, form, token, keepalive } = {}) {
+      const headers = {};
+      let body;
+      if (json) { headers["Content-Type"] = "application/json"; body = JSON.stringify(json); }
+      if (form) { headers["Content-Type"] = "application/x-www-form-urlencoded"; body = new URLSearchParams(form); }
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch(LOGIN_API + path, { method, headers, body, keepalive });
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+      if (!res.ok) {
+        const err = new Error(data?.error?.description || data?.error_description || `요청 실패 (${res.status})`);
+        err.status = res.status;
+        err.code = data?.error?.code;
+        throw err;
+      }
+      return data;
+    }
+
+    function oauthQuery() {
+      return new URLSearchParams({
+        projectId: XSOLLA.loginProjectId,
+        client_id: XSOLLA.clientId,
+        response_type: "code",
+        redirect_uri: XSOLLA.redirectUri,
+        state,
+        scope: "offline",  // refresh_token 발급
+      });
+    }
+    const identity = (kind, value) =>
+      kind === "email" ? { email: value.toLowerCase() } : { phone_number: value };
+
+    // 1단계: 인증 코드 발송 → operation_id
+    async function requestCode(kind, value) {
+      state = randomId();
+      const data = await call(`/oauth2/login/${kind}/request?${oauthQuery()}`, {
+        json: { ...identity(kind, value), send_link: false },
+      });
+      return data.operation_id;
+    }
+
+    // 2단계: 코드 확인 → login_url의 code를 토큰으로 교환
+    async function confirmCode(kind, value, code, operationId) {
+      const data = await call(`/oauth2/login/${kind}/confirm?${oauthQuery()}`, {
+        json: { ...identity(kind, value), code, operation_id: operationId },
+      });
+      const url = new URL(data.login_url);
+      if (url.searchParams.get("state") !== state) throw new Error("인증 응답이 올바르지 않습니다. 다시 시도해 주세요.");
+      await issueToken({
+        grant_type: "authorization_code",
+        client_id: XSOLLA.clientId,
+        redirect_uri: XSOLLA.redirectUri,
+        code: url.searchParams.get("code"),
+      });
+    }
+
+    async function issueToken(form) {
+      const data = await call("/oauth2/token", { form });
+      auth = {
+        access: data.access_token,
+        refresh: data.refresh_token || auth?.refresh || null,
+        exp: Date.now() + (data.expires_in || 3600) * 1000,
+      };
+      store.set(AUTH_KEY, JSON.stringify(auth));
+    }
+
+    // 만료 1분 전이면 갱신. 갱신이 거부되면(4xx) 로그아웃, 네트워크 오류면 유지
+    async function token() {
+      if (!auth) return null;
+      if (Date.now() < auth.exp - 60000) return auth.access;
+      if (!auth.refresh) { logout(); return null; }
+      try {
+        await issueToken({ grant_type: "refresh_token", client_id: XSOLLA.clientId, refresh_token: auth.refresh });
+        return auth.access;
+      } catch (e) {
+        if (e.status >= 400 && e.status < 500) logout();
+        return null;
+      }
+    }
+
+    function claims() {
+      if (!auth) return null;
+      try {
+        const b64 = auth.access.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+        return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0))));
+      } catch { return null; }
+    }
+
+    function logout() {
+      auth = null;
+      store.del(AUTH_KEY);
+    }
+
+    // 계정 속성(attribute)에 게임 저장: 클라이언트가 쓸 수 있는 private 속성
+    async function loadAttr(key) {
+      const t = await token();
+      if (!t) return undefined;
+      const list = await call("/attributes/users/me/get", {
+        token: t,
+        json: { keys: [key], publisher_project_id: XSOLLA.publisherProjectId },
+      });
+      const attr = Array.isArray(list) ? list.find(a => a.key === key) : null;
+      return attr ? attr.value : null;
+    }
+
+    async function saveAttr(key, value, keepalive = false) {
+      const t = await token();
+      if (!t) return;
+      await call("/attributes/users/me/update", {
+        token: t,
+        keepalive,
+        json: {
+          attributes: [{ key, permission: "private", value }],
+          publisher_project_id: XSOLLA.publisherProjectId,
+        },
+      });
+    }
+
+    return {
+      configured, deviceId, requestCode, confirmCode, logout, claims, loadAttr, saveAttr,
+      loggedIn: () => !!auth,
+    };
+  })();
+
   // ---- 게임 상태 ----
   let map, visible, seen, player, enemies, items, depth, gameOver;
+  let bestDepth = 0;
 
   const ENEMY_TYPES = [
     { ch: "r", name: "쥐",     color: "#a58b6f", hp: 3,  atk: 1, xp: 2 },
@@ -337,16 +596,108 @@
 
   function descend() {
     depth++;
+    bestDepth = Math.max(bestDepth, depth);
     log(`${depth}층으로 내려간다...`, "info");
+    const rooms = generateDungeon();
+    newLevel(rooms);
+    render();
+    updateStats();
+    saveGame(true);
+  }
+
+  function death() {
+    gameOver = true;
+    bestDepth = Math.max(bestDepth, depth);
+    log(`당신은 ${depth}층에서 쓰러졌다. R을 눌러 재시작.`, "bad");
+  }
+
+  // ---- 저장 / 불러오기 ----
+  // 계정 속성 값은 짧게 유지하려고 키를 줄여서 저장. 층 구조는 저장하지 않고 이어하기 때 새로 만듦
+  function makeSave() {
+    return {
+      v: 1,
+      best: bestDepth,
+      run: gameOver ? null : {
+        d: depth, hp: player.hp, mh: player.maxHp, a: player.atk, g: player.gold,
+        p: player.potions, l: player.plvl, x: player.xp, xn: player.xpNext,
+      },
+    };
+  }
+
+  function parseSave(text) {
+    try {
+      const s = JSON.parse(text);
+      return s && s.v === 1 ? s : null;
+    } catch { return null; }
+  }
+
+  // 로그인 직후 계정 저장본을 먼저 불러오기 전까지는 클라우드에 쓰지 않음 (덮어쓰기 방지)
+  let cloudReady = false;
+  let cloudTimer = null;
+
+  function saveGame(flushNow = false) {
+    store.set(SAVE_KEY, JSON.stringify(makeSave()));
+    if (!cloudReady) return;
+    clearTimeout(cloudTimer);
+    cloudTimer = setTimeout(flushCloud, flushNow ? 0 : 2000);
+  }
+
+  async function flushCloud(keepalive = false) {
+    clearTimeout(cloudTimer);
+    cloudTimer = null;
+    if (!cloudReady) return;
+    try {
+      await Account.saveAttr(SAVE_ATTR, store.get(SAVE_KEY), keepalive);
+    } catch (e) {
+      log(`계정에 저장하지 못했다: ${e.message}`, "bad");
+    }
+  }
+
+  function startFromSave(s) {
+    bestDepth = s?.best || 0;
+    if (s?.run) resumeRun(s.run);
+    else newGame();
+  }
+
+  function resumeRun(r) {
+    depth = r.d;
+    gameOver = false;
+    player = {
+      x: 0, y: 0,
+      hp: r.hp, maxHp: r.mh,
+      atk: r.a,
+      gold: r.g,
+      potions: r.p,
+      plvl: r.l, xp: r.x, xpNext: r.xn,
+    };
+    logEl.innerHTML = "";
+    log(`${depth}층에서 이어서 시작한다.`, "info");
     const rooms = generateDungeon();
     newLevel(rooms);
     render();
     updateStats();
   }
 
-  function death() {
-    gameOver = true;
-    log(`당신은 ${depth}층에서 쓰러졌다. R을 눌러 재시작.`, "bad");
+  // 계정 저장본이 있으면 그걸로 이어하고, 없으면 지금(게스트) 진행 상황을 계정에 올림
+  async function syncAfterLogin() {
+    cloudReady = false;
+    try {
+      const cloud = parseSave(await Account.loadAttr(SAVE_ATTR));
+      if (!Account.loggedIn()) return;
+      if (cloud) {
+        store.set(SAVE_KEY, JSON.stringify(cloud));
+        startFromSave(cloud);
+        log("계정에 저장된 진행 상황을 불러왔다.", "good");
+      } else {
+        await Account.saveAttr(SAVE_ATTR, JSON.stringify(makeSave()));
+        log("지금 진행 상황을 계정에 저장했다.", "good");
+      }
+      cloudReady = true;
+    } catch (e) {
+      log(`계정 저장 데이터를 불러오지 못했다: ${e.message}`, "bad");
+    } finally {
+      renderAccount();
+    }
   }
 
   // ---- 적 턴 ----
@@ -369,6 +720,7 @@
     if (!gameOver) computeFOV();
     render();
     updateStats();
+    saveGame();
   }
 
   function moveToward(e) {
@@ -453,6 +805,7 @@
     document.getElementById("plvl").textContent = player.plvl;
     document.getElementById("xp").textContent = player.xp;
     document.getElementById("xpn").textContent = player.xpNext;
+    document.getElementById("best").textContent = bestDepth;
   }
 
   // ---- 초기화 ----
@@ -473,10 +826,149 @@
     newLevel(rooms);
     render();
     updateStats();
+    saveGame();
   }
+
+  // ---- 계정 UI ----
+  const accountStatus = document.getElementById("account-status");
+  const accountBtn = document.getElementById("account-btn");
+  const modal = document.getElementById("login-modal");
+  const stepId = document.getElementById("step-id");
+  const stepCode = document.getElementById("step-code");
+  const idInput = document.getElementById("login-id");
+  const codeInput = document.getElementById("login-code");
+  const loginMsg = document.getElementById("login-msg");
+  let loginKind = "email", loginValue = "", operationId = null;
+
+  function renderAccount() {
+    const guest = `게스트 #${Account.deviceId().slice(0, 6)} 로 플레이 중`;
+    if (!Account.configured()) {
+      accountStatus.textContent = guest;
+      accountBtn.textContent = "계정 연결";
+      accountBtn.disabled = true;
+      accountBtn.title = "Xsolla Login 설정(loginProjectId, clientId)이 필요합니다";
+      return;
+    }
+    accountBtn.disabled = false;
+    accountBtn.title = "";
+    if (Account.loggedIn()) {
+      const c = Account.claims();
+      accountStatus.textContent = `${c?.email || c?.phone_number || "계정"} 로그인됨`;
+      accountBtn.textContent = "로그아웃";
+    } else {
+      accountStatus.textContent = guest;
+      accountBtn.textContent = "계정 연결";
+    }
+  }
+
+  function setMsg(text, cls = "") {
+    loginMsg.textContent = text;
+    loginMsg.className = cls;
+  }
+
+  function showStep(step) {
+    stepId.hidden = step !== "id";
+    stepCode.hidden = step !== "code";
+    (step === "id" ? idInput : codeInput).focus();
+  }
+
+  function setKind(kind) {
+    loginKind = kind;
+    for (const b of modal.querySelectorAll(".tabs button")) b.classList.toggle("on", b.dataset.kind === kind);
+    const email = kind === "email";
+    document.getElementById("login-id-label").textContent = email ? "이메일" : "휴대폰 번호";
+    idInput.type = email ? "email" : "tel";
+    idInput.autocomplete = email ? "email" : "tel";
+    idInput.placeholder = email ? "you@example.com" : "010-1234-5678 또는 +82 10…";
+    idInput.value = "";
+    setMsg("");
+    showStep("id");
+  }
+
+  // 010-1234-5678 같은 국내 번호는 국제 형식(+8210…)으로 바꿈
+  function normalizePhone(v) {
+    const d = v.replace(/[\s()-]/g, "");
+    return /^0\d{9,10}$/.test(d) ? "+82" + d.slice(1) : d;
+  }
+
+  function openLogin() {
+    modal.hidden = false;
+    setKind("email");
+  }
+
+  function closeLogin() {
+    modal.hidden = true;
+  }
+
+  async function busy(form, fn) {
+    const buttons = form.querySelectorAll("button");
+    buttons.forEach(b => (b.disabled = true));
+    try { await fn(); } finally { buttons.forEach(b => (b.disabled = false)); }
+  }
+
+  stepId.addEventListener("submit", (e) => {
+    e.preventDefault();
+    loginValue = loginKind === "phone" ? normalizePhone(idInput.value.trim()) : idInput.value.trim();
+    if (loginKind === "phone" && !/^\+\d{8,15}$/.test(loginValue)) {
+      setMsg("휴대폰 번호 형식을 확인해 주세요.", "err");
+      return;
+    }
+    busy(stepId, async () => {
+      setMsg("인증 코드를 보내는 중…");
+      try {
+        operationId = await Account.requestCode(loginKind, loginValue);
+        codeInput.value = "";
+        setMsg(`${loginValue}(으)로 인증 코드를 보냈어요.`, "ok");
+        showStep("code");
+      } catch (err) {
+        setMsg(err.message, "err");
+      }
+    });
+  });
+
+  stepCode.addEventListener("submit", (e) => {
+    e.preventDefault();
+    busy(stepCode, async () => {
+      setMsg("확인하는 중…");
+      try {
+        await Account.confirmCode(loginKind, loginValue, codeInput.value.trim(), operationId);
+        closeLogin();
+        renderAccount();
+        await syncAfterLogin();
+      } catch (err) {
+        // 코드는 1회용이라 실패하면 새 코드를 받아야 할 수 있음
+        setMsg(`${err.message} 코드가 만료됐다면 '다시 입력'으로 새 코드를 받아 주세요.`, "err");
+      }
+    });
+  });
+
+  document.getElementById("login-back").addEventListener("click", () => { setMsg(""); showStep("id"); });
+  document.getElementById("login-close").addEventListener("click", closeLogin);
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeLogin(); });
+  modal.addEventListener("keydown", (e) => { if (e.key === "Escape") closeLogin(); });
+  for (const b of modal.querySelectorAll(".tabs button")) b.addEventListener("click", () => setKind(b.dataset.kind));
+
+  accountBtn.addEventListener("click", async () => {
+    accountBtn.blur();  // 이후 Space(대기) 키가 버튼을 다시 누르지 않게
+    if (!Account.loggedIn()) { openLogin(); return; }
+    if (cloudTimer) await flushCloud();
+    Account.logout();
+    cloudReady = false;
+    store.del(SAVE_KEY);
+    bestDepth = 0;
+    newGame();
+    log("로그아웃했다. 게스트로 새로 시작한다.", "info");
+    renderAccount();
+  });
+
+  // 탭을 닫거나 숨길 때 남은 저장을 바로 보냄
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && cloudTimer) flushCloud(true);
+  });
 
   // ---- 입력 ----
   window.addEventListener("keydown", (e) => {
+    if (!modal.hidden || e.target instanceof HTMLInputElement) return;
     const k = e.key.toLowerCase();
     let handled = true;
     switch (k) {
@@ -492,7 +984,10 @@
     if (handled) e.preventDefault();
   });
 
-  newGame();
+  // ---- 시작 ----
+  startFromSave(parseSave(store.get(SAVE_KEY)));
+  renderAccount();
+  if (Account.configured() && Account.loggedIn()) syncAfterLogin();
 })();
 </script>
 </body>
