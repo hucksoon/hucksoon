@@ -232,10 +232,11 @@
   "use strict";
 
   // ---- 설정 ----
-  // 실제 결제를 열 때(라이선스 계약 후) sandbox를 false로 바꾼다
+  // sandbox: true면 테스트 결제(실제 청구 없음, 테스트 카드), false면 실제 결제.
+  // 테스트 결제로 되돌릴 때는 여기만 true로 바꾸면 됨 (주문 생성과 결제창이 함께 바뀜)
   const SHOP = {
     projectId: 317991,
-    sandbox: true,
+    sandbox: false,
     cashSku: "cash",
     packGroup: "cash_packs",
     boxGroup: "equipment_boxes",
