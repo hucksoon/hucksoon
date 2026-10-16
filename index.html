@@ -840,9 +840,14 @@
         const score = RANK[it.rarity] * 100000 + (it.enh || 0) * 1000 + it.lvl;
         if (score > best) { best = score; item = it; }
       }
+      // 서버는 (시드, 출처, 레벨, 규칙 버전, 강화)로 아이템을 다시 만들어 검증하고 능력치를 직접 계산함.
+      // rarity·name은 Cloudflare 버전 서버용
+      const ref = (it) => ({ seed: it.seed, src: it.src, lvl: it.lvl, v: it.v || 1, enh: it.enh || 0, id: it.id });
       return {
         stage,
-        item: item && { rarity: item.rarity, enh: item.enh || 0, lvl: item.lvl, name: RLItems.itemName(item) },
+        plvl: player?.plvl || 1,
+        item: item && { ...ref(item), rarity: item.rarity, name: RLItems.itemName(item) },
+        gear: Object.values(Inv.equipped()).filter(Boolean).map(ref),
       };
     }
     const signature = (body) => `${Inv.owner()}|${JSON.stringify(body)}`;

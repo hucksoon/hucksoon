@@ -44,6 +44,35 @@
   .item { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .empty { color: var(--muted); font-size: 13px; padding: 12px 4px; }
   footer { font-size: 12px; color: var(--muted); margin-top: 14px; line-height: 1.6; }
+  li[data-id] { cursor: pointer; }
+  @media (hover: hover) { li[data-id]:hover { border-color: var(--border); background: #222632; } }
+  li[data-id]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* ---- 장비 보기 ---- */
+  .overlay { position: fixed; inset: 0; background: rgba(5, 6, 10, 0.78); display: flex; align-items: flex-start; justify-content: center; padding: 24px 12px; overflow-y: auto; z-index: 10; }
+  .overlay[hidden] { display: none; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; width: 100%; max-width: 560px; padding: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+  .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+  .modal-head h3 { margin: 0; font-size: 16px; color: var(--accent); word-break: break-all; }
+  .modal-head .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .modal button { font: inherit; color: var(--text); background: var(--row); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .modal h4 { margin: 14px 0 6px; font-size: 13px; color: var(--accent); }
+  .pstats { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+  .pstats div { background: var(--row); border-radius: 6px; padding: 6px 8px; font-size: 12px; color: var(--muted); }
+  .pstats b { display: block; color: var(--text); font-size: 15px; }
+  .pitems { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  @media (max-width: 520px) { .pitems { grid-template-columns: 1fr; } }
+  .pitem { background: var(--row); border: 1px solid transparent; border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.55; }
+  .pitem.empty { color: var(--muted); }
+  .pitem .slot { color: var(--muted); font-size: 11px; }
+  .pitem .nm { font-weight: bold; font-size: 13px; }
+  .pitem .rg { color: var(--muted); }
+  .pitem .mx .rg { color: #ffd700; }
+  .pitem .plus { color: var(--muted); }
+  .pitem.ancient { border-color: #ffd700; box-shadow: 0 0 10px rgba(255, 215, 0, 0.35); }
+  .pset div { font-size: 12px; color: var(--muted); }
+  .pset div.on { color: var(--text); }
+  .pnote { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -71,10 +100,20 @@
   </div>
 
   <footer>
-    10초마다 자동으로 새로고침해요. 이메일은 가려서 보여주고, 게스트는 게스트 번호로 표시돼요.<br>
+    10초마다 자동으로 새로고침해요. 이메일은 가려서 보여주고, 게스트는 게스트 번호로 표시돼요. 이름을 누르면 장비를 볼 수 있어요.<br>
     개발자 계정은 랭킹에서 빠져요.
   </footer>
 </main>
+
+<div class="overlay" id="player-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="player-title">
+    <div class="modal-head">
+      <div><h3 id="player-title"></h3><div class="meta" id="player-meta"></div></div>
+      <button type="button" id="player-close">닫기</button>
+    </div>
+    <div id="player-body"></div>
+  </div>
+</div>
 
 <script src="ranking-config.js"></script>
 <script>
@@ -92,8 +131,9 @@
   const $ = (id) => document.getElementById(id);
 
   // 서버 응답은 textContent로만 넣음 (이름에 HTML이 섞여도 실행되지 않게)
-  function el(tag, props = {}, ...children) {
+  function el(tag, { dataset, ...props } = {}, ...children) {
     const e = Object.assign(document.createElement(tag), props);
+    if (dataset) Object.assign(e.dataset, dataset);
     for (const c of children) if (c != null) e.append(c);
     return e;
   }
@@ -124,12 +164,72 @@
 
   function renderBoard(ol, data, myRank, value) {
     if (!data.rows.length) { ol.replaceChildren(el("div", { className: "empty", textContent: "아직 기록이 없어요. 첫 번째 주인공이 되어 보세요!" })); return; }
-    ol.replaceChildren(...data.rows.map(r => el("li", { className: r.rank === myRank ? "me" : "" },
+    ol.replaceChildren(...data.rows.map(r => el("li", {
+      className: r.rank === myRank ? "me" : "",
+      ...(r.id ? { dataset: { id: r.id }, tabIndex: 0, title: "장비 보기", onclick: () => openPlayer(r.id),
+        onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPlayer(r.id); } } } : {}),
+    },
       el("span", { className: `rank r${r.rank}`, textContent: medal(r.rank) }),
       el("span", { className: "who" }, r.name, r.guest ? el("small", { textContent: "게스트" }) : null, r.rank === myRank ? el("small", { textContent: "← 나" }) : null),
       value(r),
     )));
   }
+
+  // ---- 장비 보기: 최고 층을 세운 순간의 장비와 능력치 (서버가 시드로 검증하고 계산한 값) ----
+  const SLOT_ORDER = [["head", "머리"], ["chest", "가슴"], ["arms", "팔"], ["pants", "바지"], ["boots", "장화"], ["weapon", "무기"]];
+  const fmtTime = (ms) => new Date(ms).toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
+
+  function itemCard(it, slotName) {
+    if (!it) return el("div", { className: "pitem empty" }, el("div", { className: "slot", textContent: slotName }), "비어 있음");
+    const color = (RARITY[it.rarity] || RARITY.common).color;
+    const line = (mark, l, colorize) => el("div", { className: l.max ? "mx" : "", style: colorize ? `color:${color}` : "" },
+      `${mark} ${l.text}`, l.range ? el("span", { className: "rg", textContent: ` [${l.range}]${l.max ? " ▲" : ""}` }) : null,
+      l.plus ? el("span", { className: "plus", textContent: ` (강화 +${l.plus})` }) : null);
+    return el("div", { className: `pitem${it.ancient ? " ancient" : ""}` },
+      el("div", { className: "slot", textContent: `${it.slotName} · ${it.rarityName} · Lv.${it.lvl}${it.set ? " · " + it.set : ""}` }),
+      el("div", { className: "nm", textContent: it.name, style: `color:${color}` }),
+      ...it.main.map(l => line("★", l, false)),
+      ...it.lines.map(l => line("◆", l, true)));
+  }
+
+  async function openPlayer(id) {
+    const modal = $("player-modal");
+    $("player-title").textContent = "불러오는 중…";
+    $("player-meta").textContent = "";
+    $("player-body").replaceChildren();
+    modal.hidden = false;
+    $("player-close").focus();
+    let p;
+    try { p = await get(`/api/player?id=${encodeURIComponent(id)}`); }
+    catch { $("player-title").textContent = "정보를 불러오지 못했어요"; return; }
+    $("player-title").textContent = p.name + (p.guest ? " (게스트)" : "");
+    $("player-meta").textContent = `최고 ${p.stage}층${p.stageAt ? ` · ${fmtTime(p.stageAt)} 달성` : ""}`;
+    const body = [];
+    const g = p.gear;
+    if (!g) {
+      body.push(el("p", { className: "pnote", textContent: "아직 장비 기록이 없어요. 이 기능이 생긴 뒤 최고 층을 새로 세우면(또는 같은 층에 다시 도달하면) 저장돼요." }));
+    } else {
+      const s = g.stats;
+      body.push(el("h4", { textContent: `최고 기록(${g.stage}층) 순간의 능력치 · Lv ${s.level}` }),
+        el("div", { className: "pstats" }, ...[
+          ["공격력", s.atk], ["방어력", s.def], ["최대 HP", s.maxHp], ["치명타", `${s.crit}% (×${Number(s.critMul).toFixed(1)})`],
+          ["흡혈", `${s.lifesteal}%`], ["처치 시 회복", s.killHeal ? `HP +${s.killHeal}` : "-"], ["골드 획득", `+${s.gold}%`], ["경험치 획득", `+${s.xp}%`],
+        ].map(([k, v]) => el("div", {}, k, el("b", { textContent: String(v) })))));
+      const bySlot = Object.fromEntries((g.items || []).map(it => [it.slot, it]));
+      body.push(el("h4", { textContent: "장착 장비" }), el("div", { className: "pitems" }, ...SLOT_ORDER.map(([slot, name]) => itemCard(bySlot[slot], name))));
+      for (const set of g.sets || []) {
+        body.push(el("h4", { textContent: `${set.name} (${set.count}/6)`, style: `color:${RARITY.set.color}` }),
+          el("div", { className: "pset" }, ...set.bonuses.map(b => el("div", { className: b.on ? "on" : "", textContent: `${b.on ? "✔" : "·"} ${b.count}세트: ${b.text}` }))));
+      }
+      if (g.rejected) body.push(el("p", { className: "pnote", textContent: `확인되지 않은 장비 ${g.rejected}개는 제외했어요.` }));
+    }
+    if (p.bestItem) body.push(el("h4", { textContent: "가진 적 있는 최강 아이템" }), el("div", { className: "pitems" }, itemCard(p.bestItem, p.bestItem.slotName)));
+    body.push(el("p", { className: "pnote", textContent: "장비와 능력치는 서버가 아이템 시드로 다시 만들어 확인한 값이에요. ★ 주 능력치 · ◆ 추가 능력치 · [최소~최대] ▲ 최대치" }));
+    $("player-body").replaceChildren(...body);
+  }
+  $("player-close").addEventListener("click", () => { $("player-modal").hidden = true; });
+  $("player-modal").addEventListener("click", (e) => { if (e.target.id === "player-modal") $("player-modal").hidden = true; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("player-modal").hidden = true; });
 
   const stageValue = (r) => el("span", { className: "val", textContent: `${r.stage}층` });
   function itemValue(r) {
