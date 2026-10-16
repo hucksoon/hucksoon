@@ -38,7 +38,7 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 | `GET api.php?r=ranking&type=stage\|item&limit=50` | 랭킹 (최대 100명) |
 | `GET api.php?r=me` | 내 순위 |
 | `GET api.php?r=player&id=<공개 ID>` | 그 사람이 최고 층을 세운 순간의 장비·능력치, 최강 아이템 |
-| `POST api.php?r=lobby` `{ scene: "lobby", x, y, portal }` 또는 `{ scene: "dungeon", depth }` | 마을 위치(또는 탐험 중인 층)를 알리고, 지금 접속 중인 사람들을 받음 |
+| `POST api.php?r=lobby` `{ scene: "lobby", x, y, portal }` 또는 `{ scene: "dungeon", depth }` | 로비 위치(또는 탐험 중인 층)를 알리고, 지금 접속 중인 사람들을 받음 |
 | `GET api.php?r=market&slot=&rarity=&sort=new\|cash\|gold` | 거래소에 올라온 아이템 (누구나) |
 | `POST api.php?r=market_list` `{ item, gold, cash, stage }` | 아이템 올리기 (로그인) |
 | `POST api.php?r=market_cancel` `{ id }` | 내 아이템 내리기 → 우편함 |
@@ -46,11 +46,11 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 | `GET api.php?r=market_mine` | 내가 올린 아이템, 지난 거래, 우편함 |
 | `POST api.php?r=mail_claim` `{ id }` | 우편 받기 (판매 캐시는 이때 Xsolla로 지급) |
 
-## 마을 (지금 접속 중인 사람)
+## 로비 (지금 접속 중인 사람)
 
-- 게임은 마을에서 1초마다, 던전에서는 10초마다 `lobby`를 불러요. 소식이 끊기면 마을은 8초, 던전은 25초 뒤 목록에서 빠져요
+- 게임은 로비에서 1초마다, 던전에서는 10초마다 `lobby`를 불러요. 소식이 끊기면 로비는 8초, 던전은 25초 뒤 목록에서 빠져요
 - `presence` 표에는 내부 키(HMAC), 공개 ID, 가린 이름, 위치만 있어요. 1분 넘게 소식이 없는 줄은 지워요
-- 개발자 계정도 마을에는 보여요 (가린 이름). 랭킹에서만 빠져요
+- 개발자 계정도 로비에는 보여요 (가린 이름). 랭킹에서만 빠져요
 - 접속자가 많아지면(수십 명 이상) SQLite 대신 MySQL을 쓰거나, 웹소켓 서버로 바꾸는 걸 생각해 보세요
 
 ## 장비 보기와 위조 검증 (PHP 버전에만 있음)
@@ -65,7 +65,7 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 
 ## 거래소와 우편함
 
-- 마을의 거래소에서 가방의 아이템을 골드·캐시 가격으로 올리고, 다른 사람이 사요. 거래는 **로그인 사용자만** (캐시 수수료 때문)
+- 로비의 거래소에서 가방의 아이템을 골드·캐시 가격으로 올리고, 다른 사람이 사요. 거래는 **로그인 사용자만** (캐시 수수료 때문)
 - **수수료**: 모든 거래에 캐시 1. 사는 사람이 가격에 더해 내요 (가격 ◆3 → ◆4 차감). 판매자는 정한 가격을 그대로 받아요
 - **레전더리·세트** 아이템은 캐시 가격이 1 이상이어야 해요
 - 캐시 차감: 서버가 **구매자의 로그인 토큰**으로 Xsolla 인벤토리의 가상 화폐를 사용(consume)해요. 별도 아이템이 필요 없어요
