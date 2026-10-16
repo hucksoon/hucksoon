@@ -198,6 +198,11 @@
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
   }
   .modal h2 { margin: 0 0 6px; font-size: 17px; color: var(--accent); }
+  .modal.death { max-width: 360px; display: flex; flex-direction: column; gap: 8px; text-align: center; }
+  .modal.death h2 { color: #ff6b6b; }
+  .modal.death button { width: 100%; padding: 10px; }
+  #death-revive .cash { color: #2fd6b5; font-weight: bold; }
+  #death-revive .note { font-size: 12px; opacity: 0.7; margin: 4px 0 0; }
   .modal .sub { margin: 0 0 14px; font-size: 12px; line-height: 1.5; opacity: 0.7; }
   .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
   .tabs button { flex: 1; }
@@ -372,6 +377,16 @@
     <div id="shop-items" class="shop-grid"></div>
     <button id="shop-reroll" type="button"></button>
     <button id="shop-close" type="button">닫기 (Esc)</button>
+  </div>
+</div>
+
+<div id="death-modal" class="overlay" hidden>
+  <div class="modal death" role="dialog" aria-modal="true" aria-labelledby="death-title">
+    <h2 id="death-title">쓰러졌다…</h2>
+    <p class="sub" id="death-sub"></p>
+    <div id="death-revive"></div>
+    <p id="death-msg"></p>
+    <button id="death-restart" type="button">새로 시작 (R)</button>
   </div>
 </div>
 
@@ -1220,21 +1235,58 @@
   function death() {
     gameOver = true;
     bestDepth = Math.max(bestDepth, depth);
-    log(`당신은 ${depth}층에서 쓰러졌다. R을 눌러 재시작.`, "bad");
+    log(`당신은 ${depth}층에서 쓰러졌다. ${player.revived ? "" : "부활하거나 "}R을 눌러 재시작.`, "bad");
+    saveGame(true);
+    openDeath();
   }
 
   // ---- 저장 / 불러오기 ----
-  // 계정 속성 값은 짧게 유지하려고 키를 줄여서 저장. 층 구조는 저장하지 않고 이어하기 때 새로 만듦
+  // 계정 속성 값은 짧게 유지하려고 키를 줄여서 저장
+  // run: 진행 중인 판, dead: 쓰러졌지만 아직 부활할 수 있는 판 (캐시를 충전하고 돌아와도 부활할 수 있게)
+  // 층 구조(지형, 몬스터, 바닥 아이템)는 크기 때문에 이 브라우저에만 따로 저장 (LEVEL_KEY)
+  const runFields = () => ({
+    d: depth, hp: player.hp, mh: player.maxHp, a: player.atk, g: player.gold,
+    p: player.potions, l: player.plvl, x: player.xp, xn: player.xpNext,
+    rid: player.rid, k: player.kills, pp: player.potionPicks, sb: shopBought, sr: shopRerolls,
+    rv: player.revived ? 1 : 0,
+  });
   function makeSave() {
     return {
       v: 1,
       best: bestDepth,
-      run: gameOver ? null : {
-        d: depth, hp: player.hp, mh: player.maxHp, a: player.atk, g: player.gold,
-        p: player.potions, l: player.plvl, x: player.xp, xn: player.xpNext,
-        rid: player.rid, k: player.kills, pp: player.potionPicks, sb: shopBought, sr: shopRerolls,
-      },
+      run: gameOver ? null : runFields(),
+      dead: gameOver && !player.revived ? runFields() : null,
     };
+  }
+
+  // ---- 층 상태: 상점·랭킹에 다녀오거나 새로고침해도 같은 층이 그대로 이어지게 ----
+  const LEVEL_KEY = "rl_level";
+  function saveLevel() {
+    if (gameOver || !map) { store.del(LEVEL_KEY); return; }
+    store.set(LEVEL_KEY, JSON.stringify({
+      rid: player.rid, d: depth, turn,
+      map: map.map(r => r.join("")).join(""),
+      seen: seen.map(r => r.map(v => (v ? 1 : 0)).join("")).join(""),
+      px: player.x, py: player.y, shop, enemies, items,
+    }));
+  }
+  // 저장된 층이 지금 판·층과 같으면 복원하고 true
+  function restoreLevel() {
+    let L = null;
+    try { L = JSON.parse(store.get(LEVEL_KEY)); } catch {}
+    if (!L || L.rid !== player.rid || L.d !== depth || L.map?.length !== MAP_W * MAP_H || L.seen?.length !== MAP_W * MAP_H) return false;
+    const grid = (str, f) => Array.from({ length: MAP_H }, (_, y) => Array.from({ length: MAP_W }, (_, x) => f(str[y * MAP_W + x])));
+    map = grid(L.map, Number);
+    seen = grid(L.seen, c => c === "1");
+    visible = Array.from({ length: MAP_H }, () => new Array(MAP_W).fill(false));
+    player.x = L.px; player.y = L.py;
+    shop = L.shop || null;
+    enemies = Array.isArray(L.enemies) ? L.enemies : [];
+    items = Array.isArray(L.items) ? L.items : [];
+    turn = L.turn || 0;
+    computeFOV();
+    noteSeen();
+    return true;
   }
 
   function parseSave(text) {
@@ -1250,6 +1302,7 @@
 
   function saveGame(flushNow = false) {
     store.set(SAVE_KEY, JSON.stringify(makeSave()));
+    saveLevel();
     Ranking.schedule();
     if (!cloudReady) return;
     clearTimeout(cloudTimer);
@@ -1270,10 +1323,21 @@
   function startFromSave(s) {
     bestDepth = s?.best || 0;
     if (s?.run) resumeRun(s.run);
+    else if (s?.dead) resumeDead(s.dead);
     else newGame();
   }
 
-  function resumeRun(r) {
+  // 쓰러진 상태로 다시 열었을 때: 그 판을 불러와 쓰러진 화면을 보여줌 (부활하거나 새로 시작)
+  function resumeDead(r) {
+    resumeRun(r, { restore: false });
+    gameOver = true;
+    player.hp = 0;
+    log(`${depth}층에서 쓰러진 상태다. 부활하거나 R을 눌러 새로 시작.`, "bad");
+    updateStats();
+    openDeath();
+  }
+
+  function resumeRun(r, { restore = true } = {}) {
     depth = r.d;
     gameOver = false;
     player = {
@@ -1284,14 +1348,19 @@
       potions: r.p,
       plvl: r.l, xp: r.x, xpNext: r.xn,
       rid: r.rid || newRunId(), kills: r.k || 0, potionPicks: r.pp || 0,
+      revived: !!r.rv,
     };
     shopBought = Array.isArray(r.sb) ? r.sb : [];
     shopRerolls = r.sr || 0;
     player.hp = Math.min(player.hp, stats().maxHp);
     logEl.innerHTML = "";
-    log(`${depth}층에서 이어서 시작한다.`, "info");
-    const rooms = generateDungeon();
-    newLevel(rooms);
+    if (restore && restoreLevel()) {
+      log(`${depth}층에서 이어서 시작한다. (떠났던 그 자리)`, "info");
+    } else {
+      log(`${depth}층에서 이어서 시작한다.`, "info");
+      const rooms = generateDungeon();
+      newLevel(rooms);
+    }
     render();
     updateStats();
   }
@@ -1510,6 +1579,7 @@
     shopBought = [];
     shopRerolls = 0;
     player.hp = stats().maxHp;  // 장비로 늘어난 최대 HP까지 채우고 시작
+    closeDeath();
     logEl.innerHTML = "";
     log("던전에 발을 들였다. 계단(>)을 찾아 더 깊이 내려가라.", "info");
     const rooms = generateDungeon();
@@ -1634,6 +1704,8 @@
         await syncAfterLogin();
         // 상점에서 "계정 연결하기"로 왔으면 저장을 마치고 상점으로 돌아감
         if (loginReturn) { await flushCloud(); location.href = loginReturn; }
+        // 쓰러진 창에서 계정을 연결했으면 다시 열어서 부활할 수 있게
+        else if (gameOver && deathModal.hidden) openDeath();
       } catch (err) {
         // 코드는 1회용이라 실패하면 새 코드를 받아야 할 수 있음
         setMsg(`${err.message} 코드가 만료됐다면 '다시 입력'으로 새 코드를 받아 주세요.`, "err");
@@ -2076,10 +2148,137 @@
     newGame();
   }
   document.getElementById("tp-restart").addEventListener("click", restart);
+
+  // ---- 부활 ----
+  // 쓰러지면 캐시로 부활권을 사서 바로 사용 → 그 층을 처음부터(몬스터도 새로) HP 가득 찬 채로 다시 시작. 한 판에 한 번
+  // 부활권을 샀는데 사용(소모)에 실패하면 Xsolla 인벤토리에 남고, 다음에 쓰러졌을 때 캐시 없이 쓸 수 있음
+  const REVIVE = { sku: "revive", cash: "cash", price: 50 };
+  const STORE_API = `https://store.xsolla.com/api/v2/project/${XSOLLA.publisherProjectId}`;
+  const deathModal = document.getElementById("death-modal");
+  const deathMsg = document.getElementById("death-msg");
+  const deathRevive = document.getElementById("death-revive");
+
+  async function storeCall(path, { method = "GET", body } = {}) {
+    const headers = {};
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (path.startsWith("/user") || path.startsWith("/payment")) {
+      const t = await Account.token();
+      if (!t) throw Object.assign(new Error("로그인이 만료됐어요. 계정을 다시 연결해 주세요."), { status: 401 });
+      headers.Authorization = `Bearer ${t}`;
+    }
+    const res = await fetch(STORE_API + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch {}
+    if (!res.ok) throw Object.assign(new Error(data?.errorMessage || `요청 실패 (${res.status})`), { status: res.status, code: data?.errorCode });
+    return data;
+  }
+
+  // 부활권 가격(캐시)을 카탈로그에서 읽음. 실패하면 기본값
+  let revivePrice = REVIVE.price;
+  async function loadRevivePrice() {
+    try {
+      const d = await storeCall(`/items/virtual_items?limit=50`);
+      const item = d.items?.find(i => i.sku === REVIVE.sku);
+      const p = item?.virtual_prices?.find(v => v.sku === REVIVE.cash);
+      if (p) revivePrice = Number(p.amount);
+    } catch {}
+  }
+
+  function setDeathMsg(text, cls = "") { deathMsg.textContent = text; deathMsg.className = cls ? `msg-${cls}` : ""; }
+
+  function closeDeath() { deathModal.hidden = true; }
+
+  async function openDeath() {
+    deathModal.hidden = false;
+    document.getElementById("death-sub").textContent = `${depth}층에서 쓰러졌어요. 장비는 그대로 남아요.`;
+    setDeathMsg("");
+    const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+    if (player.revived) {
+      deathRevive.replaceChildren(el("p", { className: "note", textContent: "이번 판에서는 이미 부활했어요. (한 판에 한 번)" }));
+      document.getElementById("death-restart").focus();
+      return;
+    }
+    if (!Account.configured() || !Account.loggedIn()) {
+      deathRevive.replaceChildren(
+        el("p", { className: "note", textContent: `계정을 연결하면 캐시 ${revivePrice}개로 이 층을 처음부터 다시 시작할 수 있어요.` }),
+        el("button", { type: "button", className: "primary", textContent: "계정 연결", onclick: () => { closeDeath(); openLogin(); } }));
+      return;
+    }
+    deathRevive.replaceChildren(el("p", { className: "note", textContent: "부활 정보를 불러오는 중…" }));
+    let owned = 0, balance = null;
+    await loadRevivePrice();
+    try {
+      const [inv, bal] = await Promise.all([storeCall("/user/inventory/items?limit=50"), storeCall("/user/virtual_currency_balance")]);
+      owned = inv.items?.find(i => i.sku === REVIVE.sku)?.quantity || 0;
+      balance = Number(bal.items?.find(i => i.sku === REVIVE.cash)?.amount || 0);
+    } catch (e) {
+      setDeathMsg(e.message, "bad");
+    }
+    if (deathModal.hidden || !gameOver) return;
+    const short = !owned && balance != null && balance < revivePrice;
+    const btn = el("button", { type: "button", className: "primary", id: "revive-btn", disabled: short, onclick: () => revive(owned > 0) },
+      owned ? `부활권 사용 (보유 ${owned}개)` : short ? `캐시 부족 (필요 ◆ ${revivePrice})` : `캐시 ${revivePrice}개로 부활`);
+    const parts = [btn,
+      el("p", { className: "note" }, "이 층을 처음부터 HP 가득 찬 채로 다시 시작해요. 몬스터도 새로 나와요. 한 판에 한 번만 쓸 수 있어요.")];
+    if (balance != null) parts.push(el("p", { className: "note" }, "보유 캐시 ", el("span", { className: "cash", textContent: `◆ ${balance}` })));
+    if (short) parts.push(el("a", { className: "btn", href: "shop.html", textContent: "상점에서 캐시 충전하기 (충전 후 돌아오면 부활할 수 있어요)" }));
+    deathRevive.replaceChildren(...parts);
+    btn.focus();
+  }
+
+  const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
+  let reviving = false;
+  async function revive(owned) {
+    if (reviving || !gameOver || player.revived) return;
+    reviving = true;
+    const btn = document.getElementById("revive-btn");
+    if (btn) btn.disabled = true;
+    setDeathMsg(owned ? "부활권을 사용하는 중…" : `캐시 ${revivePrice}개로 부활권을 사는 중…`);
+    try {
+      if (!owned) await storeCall(`/payment/item/${REVIVE.sku}/virtual/${REVIVE.cash}`, { method: "POST", body: {} });
+      // 산 직후에는 인벤토리 반영이 늦을 수 있어 몇 번 다시 시도
+      let lastErr = null;
+      for (let i = 0; i < 4; i++) {
+        try { await storeCall("/user/inventory/item/consume", { method: "POST", body: { sku: REVIVE.sku, quantity: 1, instance_id: null } }); lastErr = null; break; }
+        catch (e) { lastErr = e; await sleepMs(800 * (i + 1)); }
+      }
+      if (lastErr) throw Object.assign(new Error("부활권은 샀지만 사용하지 못했어요. 부활권은 계정에 남아 있으니 다시 눌러 주세요."), { keep: true });
+      doRevive();
+    } catch (e) {
+      const text = e.code === 5006 ? "캐시가 부족해요. 상점에서 충전한 뒤 돌아오면 부활할 수 있어요." : e.message;
+      setDeathMsg(text, "bad");
+      if (e.keep || e.code !== 5006) openDeath().then(() => setDeathMsg(text, "bad"));
+      else if (btn) btn.disabled = false;
+    } finally {
+      reviving = false;
+    }
+  }
+
+  function doRevive() {
+    gameOver = false;
+    player.revived = true;
+    player.hp = stats().maxHp;
+    closeDeath();
+    log(`부활했다! ${depth}층을 처음부터 다시 시작한다. (이번 판 부활 사용)`, "good");
+    const rooms = generateDungeon();
+    newLevel(rooms);
+    render();
+    updateStats();
+    saveGame(true);
+  }
+
+  document.getElementById("death-restart").addEventListener("click", () => newGame());
   document.getElementById("restart-btn").addEventListener("click", (e) => { e.currentTarget.blur(); restart(); });
 
   // ---- 입력 ----
   window.addEventListener("keydown", (e) => {
+    if (!deathModal.hidden && modal.hidden) {
+      const k = e.key.toLowerCase();
+      if (k === "r") { e.preventDefault(); newGame(); }
+      else if (k === "escape") { e.preventDefault(); closeDeath(); }
+      return;
+    }
     if (!shopModal.hidden) {
       if (e.key === "Escape") { e.preventDefault(); closeShop(); }
       return;
