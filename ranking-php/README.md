@@ -37,6 +37,28 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 | `POST api.php?r=score` `{ stage, item }` | 내 기록 올리기. 더 좋은 기록만 반영 |
 | `GET api.php?r=ranking&type=stage\|item&limit=50` | 랭킹 (최대 100명) |
 | `GET api.php?r=me` | 내 순위 |
+| `GET api.php?r=player&id=<공개 ID>` | 그 사람이 최고 층을 세운 순간의 장비·능력치, 최강 아이템 |
+
+## 장비 보기와 위조 검증 (PHP 버전에만 있음)
+
+- 게임은 장착 장비와 최강 아이템의 **(시드, 출처, 아이템 레벨, 규칙 버전, 강화 단계)** 만 보내요
+- 서버는 `rules.php`(items.js와 같은 규칙)로 아이템을 **다시 만들어** 등급·능력치·이름을 직접 계산해요. 게임이 보낸 능력치나 이름은 쓰지 않아요
+- 시드가 게임이 실제로 쓰는 형식인지 확인해요: 몬스터 처치·포션 자리(그 층, 드롭 확률 안), 상점(5층마다), 장비 상자. 층과 아이템 레벨이 맞아야 하고 최고 층보다 높을 수 없어요
+- 통과하지 못한 장비는 빼고 저장해요 (장비 창에 "확인되지 않은 장비 N개"로 표시). 최강 아이템이 통과하지 못하면 아이템 랭킹에 반영하지 않아요
+- 장비는 **최고 층을 새로 세운 순간**의 것을 저장해요. 기능이 생기기 전 기록은 같은 층에 다시 도달하면 채워져요
+- 한계: 시드 규칙이 공개돼 있어서, 좋은 아이템이 나오는 시드를 오프라인에서 찾아 보내는 것까지는 막지 못해요 (실제 획득 기록을 서버가 받아야 막을 수 있어요). 강화 단계와 최고 층도 게임이 보내는 값이에요
+- `items.js`의 규칙을 바꾸면 `rules.php`도 같이 바꿔야 해요 (다르면 정상 아이템이 거부돼요)
+
+## 업데이트
+
+서버에 이미 올려 둔 경우, 새 파일만 덮어써요 (`config.php`와 `data/`는 그대로).
+
+```bash
+cd /tmp && rm -rf dungeon && git clone --depth 1 https://github.com/hucksoon/hucksoon.git dungeon
+sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /var/www/html/ranking/
+```
+
+DB 표는 다음 요청 때 새 칸이 자동으로 추가돼요.
 
 PATH_INFO를 지원하는 서버면 `api.php/api/score` 형식도 돼요. 게임은 주소가 `.php`로 끝나면 `?r=` 형식을 써요.
 

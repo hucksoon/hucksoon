@@ -4,6 +4,7 @@
 //   POST api.php?r=score    내 기록 올리기 { stage, item: { rarity, enh, lvl, name } | null }
 //   GET  api.php?r=ranking  &type=stage|item&limit=50  랭킹 (가린 이름만)
 //   GET  api.php?r=me       내 순위
+//   GET  api.php?r=player&id=<공개 ID>  그 사람이 최고 층을 세운 순간의 장비·능력치, 최고 아이템
 //   (서버가 PATH_INFO를 지원하면 api.php/api/score 처럼 불러도 됨)
 //
 // 누구인지는 서버가 확인한다.
@@ -13,9 +14,14 @@
 //   원본 이메일·휴대폰·기기 ID는 저장하지 않는다. 화면용 가린 값과 HMAC만 저장한다.
 //   개발자 계정(dev_emails)은 저장하지 않고 랭킹에서 빠진다.
 //
-// 설정은 config.php (config.sample.php를 복사). PHP 7.4 이상, PDO(SQLite 또는 MySQL), openssl, curl 필요.
+// 위조 방지: 게임은 장비의 (시드, 출처, 레벨, 규칙 버전, 강화)만 보내고, 서버가 rules.php로 아이템을 다시 만들어
+//   등급·능력치를 직접 계산한다. 시드가 게임이 실제로 쓰는 형식(몬스터·포션 자리·상점·장비 상자)이고 층과 맞아야 한다.
+//
+// 설정은 config.php (config.sample.php를 복사). PHP 7.4 이상, PDO(SQLite 또는 MySQL), openssl, curl, mbstring 필요.
 
 declare(strict_types=1);
+
+require_once __DIR__ . '/rules.php';
 
 const RARITY_RANK = ['common' => 0, 'uncommon' => 1, 'rare' => 2, 'epic' => 3, 'set' => 4, 'legendary' => 5];
 const MAX_STAGE = 10000;
@@ -70,7 +76,12 @@ function db(): PDO {
         token_hash   VARCHAR(64) PRIMARY KEY,
         expires_at   BIGINT NOT NULL
     )');
+    // 나중에 추가된 칸: 기존 DB에도 붙임 (이미 있으면 무시)
+    foreach (['pub_id VARCHAR(32)', 'stage_gear TEXT', 'item_json TEXT'] as $col) {
+        try { $pdo->exec("ALTER TABLE players ADD COLUMN {$col}"); } catch (PDOException $e) { /* 이미 있음 */ }
+    }
     foreach ([
+        'CREATE INDEX idx_players_pub ON players (pub_id)',
         'CREATE INDEX idx_players_stage ON players (best_stage, stage_at)',
         'CREATE INDEX idx_players_item ON players (item_score, item_at)',
         'CREATE INDEX idx_players_email ON players (email_hmac)',
@@ -261,27 +272,113 @@ function jwk_to_pem(array $jwk): string {
 
 // ---------------------------------------------------------------- 기록 올리기
 
-function read_score(array $body): array {
+const SLOT_NAMES = ['head' => '머리', 'chest' => '가슴', 'arms' => '팔', 'pants' => '바지', 'boots' => '장화', 'weapon' => '무기'];
+
+// 게임이 실제로 만드는 시드인지, 층·출처가 맞는지 (items.js / index.html / shop.html 의 시드 형식)
+function seed_origin_ok(int $v, string $seed, string $src, int $lvl): bool {
+    if (preg_match('/^[0-9A-Za-z_-]{1,40}\|d(\d{1,5})\|k\d{1,8}$/', $seed, $m)) {           // 몬스터 처치
+        if ((int)$m[1] !== $lvl) return false;
+        if ($src === 'drop') return r_drop_roll($v, $seed) < R_DROP_CHANCE['elite'];      // 일반 8% / 정예 40% 안에 들어야 떨어짐
+        if ($src === 'boss') return $lvl % 5 === 0;
+        return $src === 'golden' && $lvl >= 2;
+    }
+    if (preg_match('/^[0-9A-Za-z_-]{1,40}\|d(\d{1,5})\|p\d{1,8}$/', $seed, $m)) {           // 포션 자리
+        return (int)$m[1] === $lvl && $src === 'drop' && r_drop_roll($v, $seed) < R_DROP_CHANCE['normal'];
+    }
+    if (preg_match('/^[0-9A-Za-z_-]{1,40}\|shop\|d(\d{1,5})(\|r[1-3])?\|s[0-5]$/', $seed, $m)) { // 상점 (5층마다)
+        return (int)$m[1] === $lvl && $lvl % 5 === 0 && $src === 'golden';
+    }
+    if (preg_match('/^box\|o[0-9A-Za-z]{1,48}\|(\d{1,2})$/', $seed, $m)) {                   // 장비 상자 (최대 50회)
+        return $src === 'box' && (int)$m[1] < 50;
+    }
+    return false;
+}
+
+// 게임이 보낸 아이템 참조 { seed, src, lvl, v, enh } → 서버가 다시 만든 아이템. 형식이 틀리거나 위조면 null
+function verify_item($q, int $maxLvl): ?array {
+    if (!is_array($q)) return null;
+    $seed = $q['seed'] ?? null; $src = $q['src'] ?? null; $lvl = $q['lvl'] ?? null; $v = $q['v'] ?? 1; $enh = $q['enh'] ?? 0;
+    if (!is_string($seed) || strlen($seed) > 120 || !is_string($src) || !isset(R_TABLES[$src])) return null;
+    // 아이템 레벨은 얻은 층이라 최고 층보다 높을 수 없음
+    if (!is_int($lvl) || $lvl < 1 || $lvl > $maxLvl || !in_array($v, [1, 2], true)) return null;
+    if (!is_int($enh) || $enh < 0 || $enh > MAX_ENH) return null;
+    if (!seed_origin_ok($v, $seed, $src, $lvl)) return null;
+    $item = r_generate($v, $seed, $src, $lvl);
+    if (isset($q['id']) && $q['id'] !== $item['id']) return null;
+    $item['enh'] = $enh;
+    return $item;
+}
+
+// 화면에 보여줄 아이템 정보 (서버가 계산한 값만)
+function item_view(array $it): array {
+    $fmt = function (string $k, int $v): string { return R_STAT_NAMES[$k][0] . ' +' . $v . (R_STAT_NAMES[$k][1] ? '%' : ''); };
+    $rng = function (string $k, ?array $r): ?string {
+        if (!$r) return null;
+        $u = R_STAT_NAMES[$k][1] ? '%' : '';
+        return $r[0] === $r[1] ? "{$r[1]}{$u}" : "{$r[0]}~{$r[1]}{$u}";
+    };
+    $eb = r_enhanced_base($it);
+    $main = [];
+    foreach (r_main_stats($it) as [$k, $v]) {
+        $range = isset($it['main']) ? r_main_range($k, $it) : null;
+        $main[] = ['text' => $fmt($k, $eb[$k]), 'range' => $rng($k, $range), 'max' => $range && $v === $range[1], 'plus' => $eb[$k] - $v];
+    }
+    $lines = [];
+    foreach (r_enhanced_lines($it) as [$k, $v, $plus]) {
+        $range = r_line_range($k, $it['lvl']);
+        $lines[] = ['text' => $fmt($k, $v), 'range' => $rng($k, $range), 'max' => $v - $plus === $range[1], 'plus' => $plus];
+    }
+    return [
+        'name' => r_item_name($it), 'rarity' => $it['rarity'], 'rarityName' => R_RARITIES[$it['rarity']]['name'],
+        'slot' => $it['slot'], 'slotName' => SLOT_NAMES[$it['slot']], 'lvl' => $it['lvl'], 'enh' => $it['enh'],
+        'ancient' => !empty($it['ancient']), 'set' => $it['set'] ? R_SETS[$it['set']]['name'] : null,
+        'main' => $main, 'lines' => $lines,
+    ];
+}
+
+function read_score(array $body, int $oldBest): array {
     $stage = $body['stage'] ?? null;
     if (!is_int($stage) || $stage < 1 || $stage > MAX_STAGE) throw new HttpError(400, 'bad_stage');
+    $maxLvl = max($stage, $oldBest);
+    $plvl = $body['plvl'] ?? 1;
+    if (!is_int($plvl) || $plvl < 1 || $plvl > 500) $plvl = 1;
+
+    // 최고 아이템: 시드로 다시 만든 아이템만 인정 (시드가 없는 예전 형식은 무시)
     $item = null;
-    if (!empty($body['item'])) {
-        $it = $body['item'];
-        if (!is_array($it)) throw new HttpError(400, 'bad_item');
-        $rarity = $it['rarity'] ?? '';
-        $enh = $it['enh'] ?? null;
-        $lvl = $it['lvl'] ?? null;
-        if (!is_string($rarity) || !array_key_exists($rarity, RARITY_RANK)) throw new HttpError(400, 'bad_item');
-        if (!is_int($enh) || $enh < 0 || $enh > MAX_ENH) throw new HttpError(400, 'bad_item');
-        // 아이템 레벨은 얻은 층이라 최고 층보다 높을 수 없음
-        if (!is_int($lvl) || $lvl < 1 || $lvl > $stage) throw new HttpError(400, 'bad_item');
-        $name = mb_substr(preg_replace('/[\x00-\x1f<>]/u', '', (string)($it['name'] ?? '')) ?? '', 0, 40);
-        $item = ['rarity' => $rarity, 'enh' => $enh, 'lvl' => $lvl, 'name' => $name, 'score' => RARITY_RANK[$rarity] * 100000 + $enh * 1000 + $lvl];
+    $verified = verify_item($body['item'] ?? null, $maxLvl);
+    if ($verified) {
+        $item = [
+            'rarity' => $verified['rarity'], 'enh' => $verified['enh'], 'lvl' => $verified['lvl'], 'name' => r_item_name($verified),
+            'score' => RARITY_RANK[$verified['rarity']] * 100000 + $verified['enh'] * 1000 + $verified['lvl'],
+            'json' => json_encode(item_view($verified), JSON_UNESCAPED_UNICODE),
+        ];
     }
-    return [$stage, $item];
+
+    // 장착 장비: 부위마다 1개, 검증을 통과한 것만
+    $gear = [];
+    $rejected = 0;
+    foreach (array_slice(is_array($body['gear'] ?? null) ? $body['gear'] : [], 0, 6) as $q) {
+        $it = verify_item($q, $maxLvl);
+        if (!$it || isset($gear[$it['slot']])) { $rejected++; continue; }
+        $gear[$it['slot']] = $it;
+    }
+    $ordered = [];
+    foreach (R_SLOTS as $slot) if (isset($gear[$slot])) $ordered[] = $gear[$slot];
+    $totals = r_totals($ordered);
+    $snapshot = [
+        'stage' => $stage,
+        'stats' => r_player_stats($plvl, $totals),
+        'items' => array_map('item_view', $ordered),
+        'sets' => array_map(function ($s) { return ['name' => $s['name'], 'count' => $s['count'], 'bonuses' => $s['bonuses']]; }, $totals['sets']),
+        'rejected' => $rejected,
+    ];
+    return [$stage, $item, $snapshot];
 }
 
 function now_ms(): int { return (int)floor(microtime(true) * 1000); }
+
+// 랭킹에 공개하는 ID: 내부 키에서 다시 만든 짧은 값 (내부 키·기기 ID·이메일을 알 수 없음)
+function pub_id(string $pkey): string { return substr(hmac_hex('p:' . $pkey), 0, 16); }
 
 function submit_score(): array {
     $who = identify();
@@ -292,11 +389,15 @@ function submit_score(): array {
         return ['ok' => true, 'ranked' => false, 'reason' => 'developer'];
     }
     $raw = file_get_contents('php://input');
-    if (strlen((string)$raw) > 4096) throw new HttpError(413, 'too_large');
+    if (strlen((string)$raw) > 8192) throw new HttpError(413, 'too_large');
     $body = json_decode((string)$raw, true);
     if (!is_array($body)) throw new HttpError(400, 'bad_json');
-    [$stage, $item] = read_score($body);
+    $st = $pdo->prepare('SELECT best_stage FROM players WHERE pkey = ?');
+    $st->execute([$who['key']]);
+    [$stage, $item, $snapshot] = read_score($body, (int)($st->fetchColumn() ?: 0));
     $now = now_ms();
+    $snapshot['at'] = $now;
+    $gearJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE);
 
     // 최고 기록만 남김: 층은 더 높을 때, 아이템은 점수가 더 높을 때만 바꿈
     $pdo->beginTransaction();
@@ -305,23 +406,26 @@ function submit_score(): array {
         $st->execute([$who['key']]);
         $old = $st->fetch();
         if (!$old) {
-            $pdo->prepare('INSERT INTO players (pkey, kind, display, email_hmac, best_stage, stage_at, item_score, item_rarity, item_enh, item_lvl, item_name, item_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
-                $who['key'], $who['kind'], $who['display'], $who['email_hmac'], $stage, $now,
-                $item ? $item['score'] : -1, $item['rarity'] ?? null, $item['enh'] ?? null, $item['lvl'] ?? null, $item['name'] ?? null, $item ? $now : null, $now,
+            $pdo->prepare('INSERT INTO players (pkey, pub_id, kind, display, email_hmac, best_stage, stage_at, stage_gear, item_score, item_rarity, item_enh, item_lvl, item_name, item_json, item_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
+                $who['key'], pub_id($who['key']), $who['kind'], $who['display'], $who['email_hmac'], $stage, $now, $gearJson,
+                $item ? $item['score'] : -1, $item['rarity'] ?? null, $item['enh'] ?? null, $item['lvl'] ?? null, $item['name'] ?? null, $item['json'] ?? null, $item ? $now : null, $now,
             ]);
         } else {
             $betterStage = $stage > (int)$old['best_stage'];
             $betterItem = $item && $item['score'] > (int)$old['item_score'];
-            $pdo->prepare('UPDATE players SET display = ?, email_hmac = ?, updated_at = ?,
-                best_stage = ?, stage_at = ?,
-                item_score = ?, item_rarity = ?, item_enh = ?, item_lvl = ?, item_name = ?, item_at = ?
+            // 장비는 최고 층을 세운 순간의 것. 예전 기록이라 장비가 없으면 같은 층일 때 채움
+            $saveGear = $betterStage || ($stage === (int)$old['best_stage'] && empty($old['stage_gear']));
+            $pdo->prepare('UPDATE players SET display = ?, email_hmac = ?, updated_at = ?, pub_id = ?,
+                best_stage = ?, stage_at = ?, stage_gear = ?,
+                item_score = ?, item_rarity = ?, item_enh = ?, item_lvl = ?, item_name = ?, item_json = ?, item_at = ?
                 WHERE pkey = ?')->execute([
-                $who['display'], $who['email_hmac'], $now,
-                $betterStage ? $stage : (int)$old['best_stage'], $betterStage ? $now : $old['stage_at'],
+                $who['display'], $who['email_hmac'], $now, $old['pub_id'] ?: pub_id($who['key']),
+                $betterStage ? $stage : (int)$old['best_stage'], $betterStage ? $now : $old['stage_at'], $saveGear ? $gearJson : $old['stage_gear'],
                 $betterItem ? $item['score'] : (int)$old['item_score'],
                 $betterItem ? $item['rarity'] : $old['item_rarity'], $betterItem ? $item['enh'] : $old['item_enh'],
                 $betterItem ? $item['lvl'] : $old['item_lvl'], $betterItem ? $item['name'] : $old['item_name'],
+                $betterItem ? $item['json'] : $old['item_json'],
                 $betterItem ? $now : $old['item_at'],
                 $who['key'],
             ]);
@@ -344,6 +448,7 @@ const BOARDS = [
 function row_out(array $r, ?int $rank): array {
     return [
         'rank' => $rank,
+        'id' => $r['pub_id'] ?? null,
         'name' => $r['display'],
         'guest' => $r['kind'] === 'guest',
         'stage' => (int)$r['best_stage'],
@@ -357,7 +462,10 @@ function get_ranking(): array {
     $type = ($_GET['type'] ?? '') === 'item' ? 'item' : 'stage';
     $limit = min(100, max(1, (int)($_GET['limit'] ?? 50) ?: 50));
     $b = BOARDS[$type];
-    $rows = db()->query("SELECT display, kind, best_stage, item_score, item_rarity, item_enh, item_lvl, item_name FROM players WHERE {$b['where']} ORDER BY {$b['order']} LIMIT {$limit}")->fetchAll();
+    // 공개 ID가 없는 예전 행은 채워 넣음
+    $missing = db()->query('SELECT pkey FROM players WHERE pub_id IS NULL LIMIT 200')->fetchAll();
+    foreach ($missing as $m) db()->prepare('UPDATE players SET pub_id = ? WHERE pkey = ?')->execute([pub_id($m['pkey']), $m['pkey']]);
+    $rows = db()->query("SELECT pub_id, display, kind, best_stage, item_score, item_rarity, item_enh, item_lvl, item_name FROM players WHERE {$b['where']} ORDER BY {$b['order']} LIMIT {$limit}")->fetchAll();
     $total = (int)db()->query("SELECT COUNT(*) AS n FROM players WHERE {$b['where']}")->fetch()['n'];
     $out = [];
     foreach ($rows as $i => $r) $out[] = row_out($r, $i + 1);
@@ -385,6 +493,24 @@ function get_me(): array {
     return array_merge(row_out($r, null), ['stageRank' => $stageRank, 'itemRank' => $itemRank]);
 }
 
+function get_player(): array {
+    $id = (string)($_GET['id'] ?? '');
+    if (!preg_match('/^[0-9a-f]{16}$/', $id)) throw new HttpError(400, 'bad_id');
+    $st = db()->prepare('SELECT * FROM players WHERE pub_id = ?');
+    $st->execute([$id]);
+    $r = $st->fetch();
+    if (!$r) throw new HttpError(404, 'not_found');
+    $gear = $r['stage_gear'] ? json_decode($r['stage_gear'], true) : null;
+    return [
+        'name' => $r['display'],
+        'guest' => $r['kind'] === 'guest',
+        'stage' => (int)$r['best_stage'],
+        'stageAt' => $r['stage_at'] !== null ? (int)$r['stage_at'] : null,
+        'gear' => $gear,
+        'bestItem' => $r['item_json'] ? json_decode($r['item_json'], true) : null,
+    ];
+}
+
 // ---------------------------------------------------------------- 시작
 
 try {
@@ -396,6 +522,7 @@ try {
     if ($route === 'score' && $method === 'POST') respond(200, submit_score());
     elseif ($route === 'ranking' && $method === 'GET') respond(200, get_ranking());
     elseif ($route === 'me' && $method === 'GET') respond(200, get_me());
+    elseif ($route === 'player' && $method === 'GET') respond(200, get_player());
     else respond(404, ['error' => 'not_found']);
 } catch (HttpError $e) {
     respond($e->status, ['error' => $e->codeName]);
