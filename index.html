@@ -2826,13 +2826,14 @@
       if (Inv.full()) return fail(`가방이 가득 찼어요 (${BAG_SIZE}칸). 인벤토리에서 정리한 뒤 받아 주세요.`);
     }
     if (m.gold && gameOver) return fail("쓰러진 판에는 골드를 받을 수 없어요. 새로 시작하거나 부활한 뒤 받아 주세요.");
-    await marketCall("mail_claim", { body: { id } });
+    const res = await marketCall("mail_claim", { body: { id } });
+    const cash = res.cashPaid ?? m.cash;  // 지난번에 캐시만 먼저 받은 우편이면 이번엔 0
     if (item) Inv.add(item, { from: "market", kind: m.kind, mail: id });
     if (m.gold) { player.gold += m.gold; updateStats(); saveGame(true); }
-    if (m.cash) await loadCash();
+    if (cash) await loadCash();
     Market.mine.mail = Market.mine.mail.filter(x => x.id !== id);
     setMailCount(Market.mine.mail.length);
-    const what = [item ? RLItems.itemName(item) : null, m.gold ? `${m.gold.toLocaleString()} 골드` : null, m.cash ? `캐시 ◆${m.cash}` : null].filter(Boolean).join(", ");
+    const what = [item ? RLItems.itemName(item) : null, m.gold ? `${m.gold.toLocaleString()} 골드` : null, cash ? `캐시 ◆${cash}` : null].filter(Boolean).join(", ");
     log(`우편함에서 ${what}을(를) 받았다.`, "good");
     if (!quiet) setMarketMsg(`${what}을(를) 받았어요.`, "good");
     if (item) Ranking.schedule();
