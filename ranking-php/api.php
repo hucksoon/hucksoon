@@ -5,7 +5,7 @@
 //   GET  api.php?r=ranking  &type=stage|item&limit=50  랭킹 (가린 이름만)
 //   GET  api.php?r=me       내 순위
 //   GET  api.php?r=player&id=<공개 ID>  그 사람이 최고 층을 세운 순간의 장비·능력치, 최고 아이템
-//   POST api.php?r=lobby    로비 위치(또는 탐험 중인 층)를 알리고, 지금 접속 중인 사람들을 받음
+//   POST api.php?r=lobby    마을 위치(또는 탐험 중인 층)를 알리고, 지금 접속 중인 사람들을 받음
 //   거래소·우편함 경로는 market.php 맨 위 설명 참고
 //   (서버가 PATH_INFO를 지원하면 api.php/api/score 처럼 불러도 됨)
 //
@@ -58,7 +58,7 @@ function db(): PDO {
     $pdo = new PDO($cfg['db_dsn'], $cfg['db_user'] ?? null, $cfg['db_pass'] ?? null, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_TIMEOUT => 5,  // SQLite: 다른 요청이 쓰는 중이면 최대 5초 기다림 (로비는 1초마다 씀)
+        PDO::ATTR_TIMEOUT => 5,  // SQLite: 다른 요청이 쓰는 중이면 최대 5초 기다림 (마을은 1초마다 씀)
     ]);
     // SQLite는 WAL 모드로: 읽기와 쓰기가 서로 덜 막힘
     if (strpos($cfg['db_dsn'], 'sqlite:') === 0) $pdo->exec('PRAGMA journal_mode = WAL');
@@ -82,7 +82,7 @@ function db(): PDO {
         token_hash   VARCHAR(64) PRIMARY KEY,
         expires_at   BIGINT NOT NULL
     )');
-    // 지금 접속 중인 사람: 로비 위치 또는 탐험 중인 층. 잠깐 동안만 쓰는 값이라 오래된 줄은 지움
+    // 지금 접속 중인 사람: 마을 위치 또는 탐험 중인 층. 잠깐 동안만 쓰는 값이라 오래된 줄은 지움
     $pdo->exec('CREATE TABLE IF NOT EXISTS presence (
         pkey         VARCHAR(64) PRIMARY KEY,
         pub_id       VARCHAR(32) NOT NULL,
@@ -535,13 +535,14 @@ function get_player(): array {
     ];
 }
 
-// ---------------------------------------------------------------- 로비 (지금 접속 중인 사람)
+// ---------------------------------------------------------------- 마을 (지금 접속 중인 사람)
 
-// 로비에 있는 사람은 1초마다, 던전에 있는 사람은 10초마다 위치를 보냄. 이 시간 동안 소식이 없으면 나간 것으로 봄
+// 마을에 있는 사람은 1초마다, 던전에 있는 사람은 10초마다 위치를 보냄. 이 시간 동안 소식이 없으면 나간 것으로 봄
 const LOBBY_TTL_MS = 8000;
 const DUNGEON_TTL_MS = 25000;
 
-// POST api.php?r=lobby { scene: "lobby", x, y } 또는 { scene: "dungeon", depth }
+// POST api.php?r=lobby { scene: "lobby", x, y, portal } 또는 { scene: "dungeon", depth }
+//   portal: 마을에 있을 때 그 사람이 포탈을 타고 나온 층 (다시 들어갈 수 있는 층, 없으면 0). 머리 위에 "◎N층"으로 보임
 // → 내 정보와 지금 접속 중인 사람들 (가린 이름과 공개 ID만)
 function lobby_ping(): array {
     $who = identify();
@@ -553,7 +554,8 @@ function lobby_ping(): array {
     $int = function ($v, int $max): int { return is_int($v) ? max(0, min($max, $v)) : 0; };
     $x = $scene === 'lobby' ? $int($body['x'] ?? 0, 63) : 0;
     $y = $scene === 'lobby' ? $int($body['y'] ?? 0, 63) : 0;
-    $depth = $scene === 'dungeon' ? $int($body['depth'] ?? 0, MAX_STAGE) : 0;
+    // depth 칸: 던전이면 탐험 중인 층, 마을이면 포탈 층
+    $depth = $int($body[$scene === 'dungeon' ? 'depth' : 'portal'] ?? 0, MAX_STAGE);
     $now = now_ms();
     $pub = pub_id($who['key']);
     $pdo = db();
@@ -572,7 +574,7 @@ function lobby_ping(): array {
     $players = [];
     foreach ($st->fetchAll() as $r) {
         $p = ['id' => $r['pub_id'], 'name' => $r['display'], 'scene' => $r['scene']];
-        if ($r['scene'] === 'lobby') { $p['x'] = (int)$r['x']; $p['y'] = (int)$r['y']; }
+        if ($r['scene'] === 'lobby') { $p['x'] = (int)$r['x']; $p['y'] = (int)$r['y']; $p['portal'] = (int)$r['depth']; }
         else $p['depth'] = (int)$r['depth'];
         $players[] = $p;
     }
