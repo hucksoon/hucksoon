@@ -108,8 +108,14 @@
     } catch { return null; }
   }
 
+  // PHP 서버(…/api.php)면 ?r=경로&…, Cloudflare Worker면 /api/경로?…
+  const url = (path) => {
+    if (!/\.php$/.test(API)) return API + path;
+    const [route, query] = path.replace(/^\/api\//, "").split("?");
+    return `${API}?r=${route}${query ? "&" + query : ""}`;
+  };
   async function get(path, headers = {}) {
-    const res = await fetch(API + path, { headers });
+    const res = await fetch(url(path), { headers });
     if (!res.ok) throw new Error(String(res.status));
     return res.json();
   }

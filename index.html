@@ -825,6 +825,8 @@
   // 서버 주소는 ranking-config.js. 로그인 사용자는 Xsolla 토큰으로, 게스트는 기기 ID로 구분
   // 이메일은 보내지 않음 (서버가 토큰에서 직접 읽고 가린 형태로만 보여줌)
   const RANKING_API = String(window.RANKING_API || "").replace(/\/+$/, "");
+  // PHP 서버(…/api.php)면 ?r=경로, Cloudflare Worker면 /api/경로
+  const rankingUrl = (route) => /\.php$/.test(RANKING_API) ? `${RANKING_API}?r=${route}` : `${RANKING_API}/api/${route}`;
   const Ranking = (() => {
     const RANK = { common: 0, uncommon: 1, rare: 2, epic: 3, set: 4, legendary: 5 };
     let timer = null;
@@ -859,7 +861,7 @@
         headers["X-Guest-Id"] = Account.deviceId();
       }
       try {
-        const res = await fetch(`${RANKING_API}/api/score`, { method: "POST", headers, body: JSON.stringify(body) });
+        const res = await fetch(rankingUrl("score"), { method: "POST", headers, body: JSON.stringify(body) });
         if (res.ok) sent = sig;
       } catch {}  // 랭킹 서버가 안 돼도 게임은 계속
     }

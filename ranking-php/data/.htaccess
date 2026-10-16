@@ -1,0 +1,3 @@
+# 이 폴더(DB, 캐시)는 웹에서 열 수 없게 막음 (Apache)
+Require all denied
+Deny from all

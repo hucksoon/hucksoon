@@ -2,3 +2,8 @@
 .env.*
 !.env.example
 node_modules/
+
+# 랭킹 서버(PHP) 비밀 설정과 데이터
+ranking-php/config.php
+ranking-php/data/*
+!ranking-php/data/.htaccess
