@@ -139,6 +139,8 @@
   .dpad button { width: 68px; height: 68px; font-size: 24px; padding: 0; }
   .dpad button:active, .dpad button.held { background: var(--border); color: var(--accent); }
   .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; flex: 1; max-width: 260px; }
+  /* 던전: 포션·인벤토리 / 도감·로비로 / 재시작(한 줄 전체) */
+  #tp-restart { grid-column: 1 / -1; }
   .actions button { padding: 12px 4px; font-size: 14px; white-space: nowrap; }
   /* 폭이 좁은 휴대폰(iPhone SE 등): 버튼을 조금 줄여 글자가 한 줄에 들어가게 */
   @media (max-width: 360px) {
@@ -146,6 +148,38 @@
     .dpad button { width: 62px; height: 62px; }
     .actions button { font-size: 12px; padding: 12px 2px; }
   }
+
+  /* ---- 로비 ---- 로비에서는 던전용 버튼(포션, 재시작, 로비로)을 숨기고 접속자 목록을 보여줌 */
+  body:not(.in-lobby) .lobby-only { display: none; }
+  body.in-lobby .dungeon-only { display: none !important; }
+  #lobby-panel {
+    width: 640px;
+    max-width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .lobby-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .lobby-head b { color: var(--accent); }
+  #lobby-count { font-size: 12px; opacity: 0.7; }
+  #lobby-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 132px;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 2px 16px;
+  }
+  #lobby-list li { display: flex; align-items: center; gap: 8px; line-height: 1.65; min-width: 0; }
+  #lobby-list .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  #lobby-list .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lobby-list .where { flex: none; font-size: 12px; opacity: 0.6; }
+  #lobby-list li.me .name { color: var(--accent); }
+  #lobby-list li.note { grid-column: 1 / -1; font-size: 12px; opacity: 0.6; }
 
   .msg-hit { color: #ff8f6b; }
   .msg-good { color: #7be08a; }
@@ -304,7 +338,7 @@
   #shop-close { width: 100%; margin-top: 8px; }
 </style>
 </head>
-<body>
+<body class="in-lobby">
 <div id="app">
   <h1>⚔ 던전 크롤러 ⚔</h1>
   <div id="account">
@@ -314,7 +348,8 @@
     <button id="dex-btn" type="button">도감 (B)</button>
     <a id="shop-btn" class="btn" href="shop.html">상점</a>
     <a id="rank-btn" class="btn" href="ranking.html" target="_blank" rel="noopener">랭킹</a>
-    <button id="restart-btn" class="keys-only" type="button">재시작 (R)</button>
+    <button id="lobby-btn" class="keys-only dungeon-only" type="button">로비로 (L)</button>
+    <button id="restart-btn" class="keys-only dungeon-only" type="button">재시작 (R)</button>
   </div>
   <div id="stats">
     <span>층 <b id="depth">1</b> (최고 <span id="best">0</span>)</span>
@@ -332,19 +367,25 @@
       <button type="button" class="left" data-dir="-1,0" aria-label="왼쪽으로">◀</button>
     </div>
     <div class="actions">
-      <button type="button" id="tp-potion">포션</button>
+      <button type="button" id="tp-potion" class="dungeon-only">포션</button>
       <button type="button" id="tp-inv">인벤토리</button>
       <button type="button" id="tp-dex">도감</button>
-      <button type="button" id="tp-restart">재시작</button>
+      <button type="button" id="tp-lobby" class="dungeon-only">로비로</button>
+      <button type="button" id="tp-restart" class="dungeon-only">재시작</button>
     </div>
     <div class="dpad dpad-right">
       <button type="button" class="right" data-dir="1,0" aria-label="오른쪽으로">▶</button>
       <button type="button" class="down" data-dir="0,1" aria-label="아래로">▼</button>
     </div>
   </div>
+  <div id="lobby-panel" class="lobby-only">
+    <div class="lobby-head"><b>같이 접속한 사람들</b><span id="lobby-count"></span></div>
+    <ul id="lobby-list"></ul>
+  </div>
   <div id="log"></div>
-  <p class="hint"><span class="keys-only">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 인벤토리: I &nbsp;·&nbsp; 도감: B &nbsp;·&nbsp; 재시작: R<br></span>
+  <p class="hint"><span class="keys-only">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 인벤토리: I &nbsp;·&nbsp; 도감: B &nbsp;·&nbsp; 로비로: L &nbsp;·&nbsp; 재시작: R<br></span>
   <span class="touch-only">방향 버튼을 누르고 있으면 계속 움직여요.<br></span>
+  로비 가운데 던전 입구(<b>▼</b>)로 들어가면 모험이 시작돼요. 던전에서 로비로 나와도 그 층은 그대로 기다려요.<br>
   계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다. 쓰러진 적이 장비(<b>)</b> 무기, <b>[</b> 방어구)를 떨어뜨리기도 해요.<br>
   금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고, 계단 옆 상점(<b>&amp;</b>)에서 골드로 장비를 살 수 있어요. 금빛 칸의 황금 고블린을 놓치지 마세요!</p>
 </div>
@@ -387,6 +428,7 @@
     <div id="death-revive"></div>
     <p id="death-msg"></p>
     <button id="death-restart" type="button">새로 시작 (R)</button>
+    <button id="death-lobby" type="button">로비로 나가기 (L)</button>
   </div>
 </div>
 
@@ -827,6 +869,18 @@
   const RANKING_API = String(window.RANKING_API || "").replace(/\/+$/, "");
   // PHP 서버(…/api.php)면 ?r=경로, Cloudflare Worker면 /api/경로
   const rankingUrl = (route) => /\.php$/.test(RANKING_API) ? `${RANKING_API}?r=${route}` : `${RANKING_API}/api/${route}`;
+  // 랭킹 서버에 누구인지 알리는 헤더. 로그인 토큰을 못 받으면 null
+  async function serverHeaders() {
+    const headers = { "Content-Type": "application/json" };
+    if (Account.loggedIn()) {
+      const t = await Account.token();
+      if (!t) return null;
+      headers.Authorization = `Bearer ${t}`;
+    } else {
+      headers["X-Guest-Id"] = Account.deviceId();
+    }
+    return headers;
+  }
   const Ranking = (() => {
     const RANK = { common: 0, uncommon: 1, rare: 2, epic: 3, set: 4, legendary: 5 };
     let timer = null;
@@ -857,14 +911,8 @@
       const body = payload();
       const sig = signature(body);
       if (sig === sent) return;
-      const headers = { "Content-Type": "application/json" };
-      if (Account.loggedIn()) {
-        const t = await Account.token();
-        if (!t) return;
-        headers.Authorization = `Bearer ${t}`;
-      } else {
-        headers["X-Guest-Id"] = Account.deviceId();
-      }
+      const headers = await serverHeaders();
+      if (!headers) return;
       try {
         const res = await fetch(rankingUrl("score"), { method: "POST", headers, body: JSON.stringify(body) });
         if (res.ok) sent = sig;
@@ -1085,6 +1133,7 @@
 
   // ---- 플레이어 액션 ----
   function tryMove(dx, dy) {
+    if (scene === "lobby") { lobbyMove(dx, dy); return; }
     if (gameOver) return;
     const nx = player.x + dx, ny = player.y + dy;
     if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) return;
@@ -1108,7 +1157,7 @@
   }
 
   function wait() {
-    if (gameOver) return;
+    if (gameOver || scene === "lobby") return;
     endTurn();
   }
 
@@ -1215,7 +1264,7 @@
   }
 
   function usePotion() {
-    if (gameOver) return;
+    if (gameOver || scene === "lobby") return;
     if (player.potions <= 0) { log("포션이 없다.", "bad"); return; }
     player.potions--;
     // 최대 HP의 30% (최소 8) 회복: 깊은 층에서도 쓸모 있게
@@ -1339,8 +1388,10 @@
     resumeRun(r, { restore: false });
     gameOver = true;
     player.hp = 0;
-    log(`${depth}층에서 쓰러진 상태다. 부활하거나 R을 눌러 새로 시작.`, "bad");
     updateStats();
+    // 로비에 있으면 던전 입구로 들어갈 때 쓰러진 화면을 보여줌
+    if (scene !== "dungeon") return;
+    log(`${depth}층에서 쓰러진 상태다. 부활하거나 R을 눌러 새로 시작.`, "bad");
     openDeath();
   }
 
@@ -1361,10 +1412,11 @@
     shopRerolls = r.sr || 0;
     player.hp = Math.min(player.hp, stats().maxHp);
     logEl.innerHTML = "";
+    const say = (msg) => { if (scene === "dungeon") log(msg, "info"); };
     if (restore && restoreLevel()) {
-      log(`${depth}층에서 이어서 시작한다. (떠났던 그 자리)`, "info");
+      say(`${depth}층에서 이어서 시작한다. (떠났던 그 자리)`);
     } else {
-      log(`${depth}층에서 이어서 시작한다.`, "info");
+      say(`${depth}층에서 이어서 시작한다.`);
       const rooms = generateDungeon();
       newLevel(rooms);
     }
@@ -1489,10 +1541,205 @@
     return true;
   }
 
+  // ---- 로비 ----
+  // 게임을 시작하기 전에 모이는 넓은 광장. 가운데 던전 입구(▼)로 들어가면 지금 판을 시작하거나 이어서 함
+  // 로비에서는 턴 없이 자유롭게 걸어다니고, 같이 접속한 사람들의 위치와 이름이 보임
+  let scene = "lobby";                // "lobby" | "dungeon"
+  const SCENE_KEY = "rl_scene";       // 새로고침·상점에 다녀오면 있던 곳으로 (새로 접속하면 로비부터)
+  const LOBBY = (() => {
+    const door = { x: 16, y: 11 };
+    const deco = new Map();           // "x,y" → 막힌 칸 종류
+    const put = (x, y, kind) => deco.set(`${x},${y}`, kind);
+    for (let x = 0; x < MAP_W; x++) { put(x, 0, "edge"); put(x, MAP_H - 1, "edge"); }
+    for (let y = 0; y < MAP_H; y++) { put(0, y, "edge"); put(MAP_W - 1, y, "edge"); }
+    // 던전 입구 건물: 5×3, 아래쪽 가운데가 문
+    for (let y = door.y - 2; y <= door.y; y++) for (let x = door.x - 2; x <= door.x + 2; x++) put(x, y, "gate");
+    deco.delete(`${door.x},${door.y}`);
+    for (const x of [door.x - 2, door.x + 2]) put(x, door.y + 1, "torch");
+    for (const [x, y] of [[6, 5], [25, 5], [6, 18], [25, 18], [11, 3], [20, 3], [11, 20], [20, 20]]) put(x, y, "pillar");
+    return { door, deco, blocked: (x, y) => x < 0 || y < 0 || x >= MAP_W || y >= MAP_H || deco.has(`${x},${y}`) };
+  })();
+  let lobbyPos = { x: LOBBY.door.x, y: LOBBY.door.y + 1 };
+
+  function setScene(s) {
+    scene = s;
+    document.body.classList.toggle("in-lobby", s === "lobby");
+    try { sessionStorage.setItem(SCENE_KEY, s); } catch {}
+    Lobby.ping();
+  }
+
+  // 처음 들어올 때는 광장 아래쪽 아무 데나, 던전에서 나올 때는 입구 바로 앞
+  function enterLobby({ fromDungeon = false } = {}) {
+    if (fromDungeon) lobbyPos = { x: LOBBY.door.x, y: LOBBY.door.y + 1 };
+    else do { lobbyPos = { x: between(10, 22), y: between(16, 20) }; } while (LOBBY.blocked(lobbyPos.x, lobbyPos.y));
+    closeShop();
+    setScene("lobby");
+    log(fromDungeon ? "로비로 나왔다. 던전은 떠난 그대로 기다린다." : "로비에 들어왔다. 가운데 던전 입구(▼)로 들어가면 모험이 시작된다.", "info");
+    render();
+  }
+
+  function enterDungeon() {
+    setScene("dungeon");
+    if (gameOver) { render(); updateStats(); openDeath(); return; }  // 쓰러진 판: 부활하거나 새로 시작
+    log(`던전 입구로 들어갔다. ${depth}층.`, "info");
+    render();
+    updateStats();
+  }
+
+  function lobbyMove(dx, dy) {
+    const nx = lobbyPos.x + dx, ny = lobbyPos.y + dy;
+    if (nx === LOBBY.door.x && ny === LOBBY.door.y) { enterDungeon(); return; }
+    if (LOBBY.blocked(nx, ny)) return;
+    lobbyPos = { x: nx, y: ny };
+    render();
+    Lobby.moved();
+  }
+
+  // 같이 접속한 사람들: 랭킹 서버에 내 위치를 알리고 다른 사람들 위치를 받음
+  // 로비에서는 1초마다(움직이면 바로), 던전에서는 10초마다 (목록에 "N층 탐험 중"으로 보이게)
+  const Lobby = (() => {
+    const listEl = document.getElementById("lobby-list");
+    const countEl = document.getElementById("lobby-count");
+    let me = null, others = [], failed = false;
+    let timer = null, inflight = false, again = false, lastSent = 0;
+    const shown = new Map();  // 다른 사람이 화면에 그려지는 위치 (받은 위치로 부드럽게 따라감)
+
+    async function ping() {
+      if (!RANKING_API) { failed = true; renderList(); return; }
+      if (inflight) { again = true; return; }
+      clearTimeout(timer);
+      inflight = true;
+      lastSent = Date.now();
+      try {
+        const headers = await serverHeaders();
+        if (!headers) throw new Error("no token");
+        const body = scene === "lobby" ? { scene, x: lobbyPos.x, y: lobbyPos.y } : { scene, depth: gameOver ? 0 : depth };
+        const res = await fetch(rankingUrl("lobby"), { method: "POST", headers, body: JSON.stringify(body) });
+        if (!res.ok) throw new Error(res.status);
+        const d = await res.json();
+        me = d.me;
+        others = (d.players || []).filter(p => p.id !== me?.id);
+        for (const id of [...shown.keys()]) if (!others.some(p => p.id === id && p.scene === "lobby")) shown.delete(id);
+        failed = false;
+      } catch {
+        failed = true;
+      } finally {
+        inflight = false;
+        renderList();
+        // 움직이는 중이면 0.25초 뒤, 아니면 로비 1초·던전(또는 다른 탭을 보는 중) 10초
+        const wait = again ? 250 : scene === "lobby" && !document.hidden ? 1000 : 10000;
+        again = false;
+        timer = setTimeout(ping, wait);
+      }
+    }
+
+    // 로비에서 움직이면 곧바로 알림 (너무 자주 보내지 않게 0.25초 간격)
+    function moved() {
+      if (inflight) { again = true; return; }
+      clearTimeout(timer);
+      timer = setTimeout(ping, Math.max(0, 250 - (Date.now() - lastSent)));
+    }
+
+    const colorOf = (id) => `hsl(${parseInt(id.slice(0, 4), 16) % 360}, 75%, 68%)`;
+
+    function renderList() {
+      const inLobby = others.filter(p => p.scene === "lobby").length;
+      countEl.textContent = failed ? "" : `${others.length + 1}명 접속 중 · 로비 ${inLobby + (scene === "lobby" ? 1 : 0)}명`;
+      const row = (name, where, color, mine) => el("li", { className: mine ? "me" : "" },
+        el("span", { className: "dot", style: { background: color } }), el("span", { className: "name" }, name), el("span", { className: "where" }, where));
+      const whereOf = (p) => p.scene === "lobby" ? "로비" : p.depth ? `${p.depth}층 탐험 중` : "던전";
+      const rows = [row(me ? `${me.name} (나)` : "나", scene === "lobby" ? "로비" : `${depth}층 탐험 중`, "#ffffff", true)];
+      for (const p of others) rows.push(row(p.name, whereOf(p), colorOf(p.id), false));
+      if (failed) rows.push(el("li", { className: "note" }, "다른 사람 정보를 불러오지 못했어요. 혼자서도 던전에 들어갈 수 있어요."));
+      else if (!others.length) rows.push(el("li", { className: "note" }, "아직 다른 사람이 없어요."));
+      listEl.replaceChildren(...rows);
+    }
+
+    // 다른 사람 위치를 1초 동안 받은 칸까지 미끄러지듯 옮김 (멀리 떨어졌으면 바로)
+    function step(dt) {
+      for (const p of others) {
+        if (p.scene !== "lobby") continue;
+        const s = shown.get(p.id);
+        if (!s || Math.abs(s.x - p.x) + Math.abs(s.y - p.y) > 8) { shown.set(p.id, { x: p.x, y: p.y }); continue; }
+        const k = Math.min(1, dt * 10);
+        s.x += (p.x - s.x) * k; s.y += (p.y - s.y) * k;
+      }
+    }
+    const people = () => others.filter(p => p.scene === "lobby").map(p => ({ ...p, ...(shown.get(p.id) || p), color: colorOf(p.id) }));
+    return { ping, moved, step, people, me: () => me };
+  })();
+
+  // 로비 화면은 계속 다시 그림 (다른 사람 움직임, 입구 빛)
+  let lobbyFrame = 0;
+  function lobbyLoop(t) {
+    const dt = Math.min(0.1, (t - lobbyFrame) / 1000 || 0);
+    lobbyFrame = t;
+    if (scene === "lobby" && !document.hidden) { Lobby.step(dt); render(); }
+    requestAnimationFrame(lobbyLoop);
+  }
+
+  function renderLobby() {
+    const t = performance.now() / 1000;
+    const { door, deco } = LOBBY;
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        const px = x * TILE, py = y * TILE;
+        const kind = deco.get(`${x},${y}`);
+        if (kind === "edge") { ctx.fillStyle = "#2a2e3d"; ctx.fillRect(px, py, TILE, TILE); continue; }
+        // 광장 바닥: 바둑판 돌
+        ctx.fillStyle = (x + y) % 2 ? "#191c26" : "#1d212c";
+        ctx.fillRect(px, py, TILE, TILE);
+        if (kind === "gate") {
+          ctx.fillStyle = "#4a3a2a";
+          ctx.fillRect(px, py, TILE, TILE);
+          ctx.fillStyle = "#2e241a";  // 벽돌 줄눈
+          ctx.fillRect(px, py + TILE / 2 - 1, TILE, 2);
+          ctx.fillRect(px + ((y % 2) ? TILE / 2 : 0), py, 2, TILE / 2);
+        } else if (kind === "pillar") {
+          ctx.fillStyle = "#3a3f52";
+          ctx.fillRect(px + 3, py + 3, TILE - 6, TILE - 6);
+          ctx.fillStyle = "#555b72";
+          ctx.fillRect(px + 3, py + 3, TILE - 6, 3);
+        } else if (kind === "torch") {
+          drawGlyph("*", px, py, `rgba(255, ${150 + Math.round(40 * Math.sin(t * 7 + x))}, 60, 1)`);
+        }
+      }
+    }
+    // 입구: 어두운 문 안에서 깜빡이는 ▼
+    const dx = door.x * TILE, dy = door.y * TILE;
+    ctx.fillStyle = "#050608";
+    ctx.fillRect(dx, dy, TILE, TILE);
+    ctx.fillStyle = `rgba(255, 207, 92, ${0.12 + 0.1 * Math.sin(t * 3)})`;
+    ctx.fillRect(dx - TILE, dy + TILE, TILE * 3, TILE);
+    drawGlyph("▼", dx, dy, `rgba(255, 207, 92, ${0.65 + 0.35 * Math.sin(t * 3)})`);
+    drawLabel("던전 입구", dx + TILE / 2, (door.y - 2) * TILE - 4, "#ffcf5c", 12);
+
+    // 다른 사람들 → 나 (내가 맨 위에 보이게)
+    for (const p of Lobby.people()) {
+      drawGlyph("@", p.x * TILE, p.y * TILE, p.color);
+      drawLabel(p.name, p.x * TILE + TILE / 2, p.y * TILE - 2, p.color, 11);
+    }
+    drawGlyph("@", lobbyPos.x * TILE, lobbyPos.y * TILE, "#ffffff");
+    drawLabel(Lobby.me()?.name || "나", lobbyPos.x * TILE + TILE / 2, lobbyPos.y * TILE - 2, "#ffffff", 11);
+  }
+
+  // 캐릭터 머리 위 이름 (검은 테두리로 바닥 위에서도 잘 보이게)
+  function drawLabel(text, cx, by, color, size) {
+    ctx.font = `bold ${size}px "Courier New", monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+    ctx.strokeText(text, cx, by);
+    ctx.fillStyle = color;
+    ctx.fillText(text, cx, by);
+  }
+
   // ---- 렌더링 ----
   function render() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (scene === "lobby") { renderLobby(); return; }
 
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
@@ -1588,7 +1835,7 @@
     player.hp = stats().maxHp;  // 장비로 늘어난 최대 HP까지 채우고 시작
     closeDeath();
     logEl.innerHTML = "";
-    log("던전에 발을 들였다. 계단(>)을 찾아 더 깊이 내려가라.", "info");
+    if (scene === "dungeon") log("던전에 발을 들였다. 계단(>)을 찾아 더 깊이 내려가라.", "info");
     const rooms = generateDungeon();
     newLevel(rooms);
     render();
@@ -2151,10 +2398,19 @@
   document.getElementById("tp-dex").addEventListener("click", openDex);
   // 재시작: 진행 중이면 한 번 더 확인 (죽은 뒤에는 바로). R 키, 위쪽 버튼, 터치 버튼이 모두 같은 동작
   function restart() {
+    if (scene === "lobby") return;
     if (!gameOver && !confirm("새로 시작할까요? 지금 판의 층, 골드, 레벨이 사라져요. 장비는 남아요.")) return;
     newGame();
   }
   document.getElementById("tp-restart").addEventListener("click", restart);
+  // 던전에서 로비로: 층은 떠난 그대로 저장돼 있어서 입구로 다시 들어가면 이어서 함
+  function leaveDungeon() {
+    if (scene !== "dungeon") return;
+    closeDeath();
+    enterLobby({ fromDungeon: true });
+  }
+  document.getElementById("tp-lobby").addEventListener("click", leaveDungeon);
+  document.getElementById("lobby-btn").addEventListener("click", (e) => { e.currentTarget.blur(); leaveDungeon(); });
 
   // ---- 부활 ----
   // 쓰러지면 캐시로 부활권을 사서 바로 사용 → 그 층을 처음부터(몬스터도 새로) HP 가득 찬 채로 다시 시작. 한 판에 한 번
@@ -2275,14 +2531,21 @@
     saveGame(true);
   }
 
-  document.getElementById("death-restart").addEventListener("click", () => newGame());
+  // 쓰러진 화면의 "새로 시작": 1층부터 (로비 입구에서 열었어도 바로 던전으로)
+  function startNew() {
+    if (scene !== "dungeon") setScene("dungeon");
+    newGame();
+  }
+  document.getElementById("death-restart").addEventListener("click", startNew);
+  document.getElementById("death-lobby").addEventListener("click", leaveDungeon);
   document.getElementById("restart-btn").addEventListener("click", (e) => { e.currentTarget.blur(); restart(); });
 
   // ---- 입력 ----
   window.addEventListener("keydown", (e) => {
     if (!deathModal.hidden && modal.hidden) {
       const k = e.key.toLowerCase();
-      if (k === "r") { e.preventDefault(); newGame(); }
+      if (k === "r") { e.preventDefault(); startNew(); }
+      else if (k === "l") { e.preventDefault(); leaveDungeon(); }
       else if (k === "escape") { e.preventDefault(); closeDeath(); }
       return;
     }
@@ -2312,6 +2575,7 @@
       case " ":                    wait(); break;
       case "q":                    usePotion(); break;
       case "r":                    restart(); break;
+      case "l":                    leaveDungeon(); break;
       default: handled = false;
     }
     if (handled) e.preventDefault();
@@ -2320,7 +2584,13 @@
   // ---- 시작 ----
   Inv.use(inventoryOwner());
   Dex.use(inventoryOwner());
+  // 새로 접속하면 로비부터. 새로고침하거나 상점에서 돌아오면 있던 곳(던전)으로
+  try { if (sessionStorage.getItem(SCENE_KEY) === "dungeon") scene = "dungeon"; } catch {}
   startFromSave(parseSave(store.get(SAVE_KEY)));
+  if (scene === "dungeon") setScene("dungeon");
+  else { logEl.innerHTML = ""; enterLobby(); }
+  requestAnimationFrame(lobbyLoop);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) Lobby.ping(); });
   renderAccount();
   collectMail(true);
   if (Account.configured() && Account.loggedIn()) syncAfterLogin();
