@@ -335,6 +335,36 @@
   .shop-card button { margin-top: 4px; }
   .shop-card.sold { opacity: 0.45; }
   #shop-reroll { width: 100%; margin-top: 10px; }
+
+  /* ---- 거래소 / 우편함 ---- */
+  .modal.market { width: 760px; max-height: calc(100vh - 32px); overflow-y: auto; }
+  #market-wallet { font-size: 12px; color: var(--accent); text-align: right; }
+  #market-wallet .cash, .market .cash { color: #2fd6b5; }
+  #market-msg { min-height: 16px; margin: 0 0 8px; font-size: 12px; }
+  #market-close { width: 100%; margin-top: 12px; }
+  #market-tabs button { white-space: nowrap; padding: 6px 4px; }
+  @media (max-width: 480px) {
+    #market-tabs { gap: 4px; }
+    #market-tabs button { font-size: 12px; }
+    .modal.market { padding: 14px; }
+  }
+  .market-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .market-filters select, .market-filters button { font: inherit; font-size: 12px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+  .market-note { font-size: 12px; opacity: 0.7; line-height: 1.5; margin: 4px 0 8px; }
+  .market-empty { font-size: 12px; opacity: 0.6; padding: 10px 2px; }
+  .market .shop-card .who { opacity: 0.6; font-size: 11px; }
+  .market .shop-card.mine { border-color: #3d4560; }
+  .sell-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .sell-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; opacity: 0.85; }
+  .sell-form input { font: inherit; font-size: 14px; color: #fff; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 8px; width: 100%; }
+  .sell-form input:focus { outline: none; border-color: var(--accent); }
+  .sell-form .full { grid-column: 1 / -1; }
+  .market-list { display: flex; flex-direction: column; gap: 6px; }
+  .market-row { display: flex; align-items: center; gap: 10px; font-size: 12px; line-height: 1.5; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; }
+  .market-row .grow { flex: 1; min-width: 0; }
+  .market-row .meta { opacity: 0.6; font-size: 11px; }
+  .market-row button { flex: none; font-size: 12px; padding: 5px 10px; }
+  .market h3.sub { margin: 14px 0 6px; font-size: 13px; }
   #shop-close { width: 100%; margin-top: 8px; }
 </style>
 </head>
@@ -348,6 +378,8 @@
     <button id="dex-btn" type="button">도감 (B)</button>
     <a id="shop-btn" class="btn" href="shop.html">상점</a>
     <a id="rank-btn" class="btn" href="ranking.html" target="_blank" rel="noopener">랭킹</a>
+    <button id="market-btn" class="keys-only lobby-only" type="button">거래소 (T)</button>
+    <button id="mail-btn" class="keys-only lobby-only" type="button">우편함 (M)</button>
     <button id="lobby-btn" class="keys-only dungeon-only" type="button">로비로 (L)</button>
     <button id="restart-btn" class="keys-only dungeon-only" type="button">재시작 (R)</button>
   </div>
@@ -370,6 +402,8 @@
       <button type="button" id="tp-potion" class="dungeon-only">포션</button>
       <button type="button" id="tp-inv">인벤토리</button>
       <button type="button" id="tp-dex">도감</button>
+      <button type="button" id="tp-market" class="lobby-only">거래소</button>
+      <button type="button" id="tp-mail" class="lobby-only">우편함</button>
       <button type="button" id="tp-lobby" class="dungeon-only">로비로</button>
       <button type="button" id="tp-restart" class="dungeon-only">재시작</button>
     </div>
@@ -386,6 +420,7 @@
   <p class="hint"><span class="keys-only">이동: 방향키 / WASD &nbsp;·&nbsp; 제자리 대기: Space &nbsp;·&nbsp; 포션: Q &nbsp;·&nbsp; 인벤토리: I &nbsp;·&nbsp; 도감: B &nbsp;·&nbsp; 로비로: L &nbsp;·&nbsp; 재시작: R<br></span>
   <span class="touch-only">방향 버튼을 누르고 있으면 계속 움직여요.<br></span>
   로비 가운데 던전 입구(<b>▼</b>)로 들어가면 모험이 시작돼요. 던전에서 로비로 나와도 그 층은 그대로 기다려요.<br>
+  로비 왼쪽 <b>거래소($, T)</b>에서 아이템을 사고팔고, 오른쪽 <b>우편함(✉, M)</b>에서 판매 대금과 돌아온 아이템을 받아요.<br>
   계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다. 쓰러진 적이 장비(<b>)</b> 무기, <b>[</b> 방어구)를 떨어뜨리기도 해요.<br>
   금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고, 계단 옆 상점(<b>&amp;</b>)에서 골드로 장비를 살 수 있어요. 금빛 칸의 황금 고블린을 놓치지 마세요!</p>
 </div>
@@ -429,6 +464,24 @@
     <p id="death-msg"></p>
     <button id="death-restart" type="button">새로 시작 (R)</button>
     <button id="death-lobby" type="button">로비로 나가기 (L)</button>
+  </div>
+</div>
+
+<div id="market-modal" class="overlay" hidden>
+  <div class="modal market" role="dialog" aria-labelledby="market-title">
+    <div class="inv-head">
+      <h2 id="market-title">거래소</h2>
+      <span id="market-wallet"></span>
+    </div>
+    <div class="tabs" id="market-tabs">
+      <button type="button" data-tab="buy">구매</button>
+      <button type="button" data-tab="sell">판매 등록</button>
+      <button type="button" data-tab="mine">내 거래</button>
+      <button type="button" data-tab="mail">우편함</button>
+    </div>
+    <p id="market-msg"></p>
+    <div id="market-body"></div>
+    <button id="market-close" type="button">닫기 (Esc)</button>
   </div>
 </div>
 
@@ -747,6 +800,16 @@
         data.stones = (data.stones || 0) + stones;
         write();
         return { count, stones };
+      },
+
+      // 거래소에 올림: 가방에서 빼고 기록만 남김 (팔리면 구매자에게, 안 팔리면 우편함으로 돌아옴)
+      remove(id, ev, extra) {
+        const i = data.bag.findIndex(x => x.id === id);
+        if (i < 0) return null;
+        const item = data.bag.splice(i, 1)[0];
+        record(ev, item, extra);
+        write();
+        return item;
       },
 
       // 판매: 가방에서 빼고 등급만큼 강화석을 받음
@@ -1557,7 +1620,17 @@
     deco.delete(`${door.x},${door.y}`);
     for (const x of [door.x - 2, door.x + 2]) put(x, door.y + 1, "torch");
     for (const [x, y] of [[6, 5], [25, 5], [6, 18], [25, 18], [11, 3], [20, 3], [11, 20], [20, 20]]) put(x, y, "pillar");
-    return { door, deco, blocked: (x, y) => x < 0 || y < 0 || x >= MAP_W || y >= MAP_H || deco.has(`${x},${y}`) };
+    // 왼쪽 거래소, 오른쪽 우편함: 문으로 걸어 들어가면 창이 열림
+    const shops = [
+      { kind: "market", label: "거래소", x0: 3, x1: 7, door: { x: 5, y: door.y }, glyph: "$", tab: "buy" },
+      { kind: "post", label: "우편함", x0: 24, x1: 28, door: { x: 26, y: door.y }, glyph: "✉", tab: "mail" },
+    ];
+    for (const s of shops) {
+      for (let y = door.y - 2; y <= door.y; y++) for (let x = s.x0; x <= s.x1; x++) put(x, y, s.kind);
+      deco.delete(`${s.door.x},${s.door.y}`);
+    }
+    const shopAt = (x, y) => shops.find(s => s.door.x === x && s.door.y === y) || null;
+    return { door, deco, shops, shopAt, blocked: (x, y) => x < 0 || y < 0 || x >= MAP_W || y >= MAP_H || deco.has(`${x},${y}`) };
   })();
   let lobbyPos = { x: LOBBY.door.x, y: LOBBY.door.y + 1 };
 
@@ -1589,6 +1662,8 @@
   function lobbyMove(dx, dy) {
     const nx = lobbyPos.x + dx, ny = lobbyPos.y + dy;
     if (nx === LOBBY.door.x && ny === LOBBY.door.y) { enterDungeon(); return; }
+    const shopDoor = LOBBY.shopAt(nx, ny);
+    if (shopDoor) { openMarket(shopDoor.tab); return; }
     if (LOBBY.blocked(nx, ny)) return;
     lobbyPos = { x: nx, y: ny };
     render();
@@ -1620,6 +1695,7 @@
         me = d.me;
         others = (d.players || []).filter(p => p.id !== me?.id);
         for (const id of [...shown.keys()]) if (!others.some(p => p.id === id && p.scene === "lobby")) shown.delete(id);
+        setMailCount(d.mail || 0);
         failed = false;
       } catch {
         failed = true;
@@ -1702,8 +1778,24 @@
           ctx.fillRect(px + 3, py + 3, TILE - 6, 3);
         } else if (kind === "torch") {
           drawGlyph("*", px, py, `rgba(255, ${150 + Math.round(40 * Math.sin(t * 7 + x))}, 60, 1)`);
+        } else if (kind === "market" || kind === "post") {
+          ctx.fillStyle = kind === "market" ? "#24443f" : "#4a2a2a";
+          ctx.fillRect(px, py, TILE, TILE);
+          ctx.fillStyle = kind === "market" ? "#1a302c" : "#341d1d";
+          ctx.fillRect(px, py + TILE / 2 - 1, TILE, 2);
+          ctx.fillRect(px + ((y % 2) ? TILE / 2 : 0), py, 2, TILE / 2);
         }
       }
+    }
+    // 거래소·우편함 문과 간판
+    for (const s of LOBBY.shops) {
+      const sx = s.door.x * TILE, sy = s.door.y * TILE;
+      ctx.fillStyle = "#050608";
+      ctx.fillRect(sx, sy, TILE, TILE);
+      const color = s.kind === "market" ? "#5ee7c8" : "#ff9b8a";
+      drawGlyph(s.glyph, sx, sy, color);
+      const mails = s.kind === "post" ? Market.mailCount : 0;
+      drawLabel(mails ? `${s.label} (${mails})` : s.label, sx + TILE / 2, (s.door.y - 2) * TILE - 4, color, 12);
     }
     // 입구: 어두운 문 안에서 깜빡이는 ▼
     const dx = door.x * TILE, dy = door.y * TILE;
@@ -2370,9 +2462,379 @@
   document.getElementById("dex-close").addEventListener("click", closeDex);
   dexModal.addEventListener("click", (e) => { if (e.target === dexModal) closeDex(); });
 
+  // ---- 거래소 / 우편함 ---- (로비에서만)
+  // 가방의 아이템을 올리면 다른 사람이 골드·캐시로 삼. 모든 거래에 캐시 수수료가 붙어서(구매자가 가격에 더해 냄) 계정 연결이 필요
+  // 등록·구매·가격·시간은 랭킹 서버에 저장. 팔린 대금, 산 아이템, 24시간이 지나거나 내린 아이템은 우편함으로 옴
+  // 골드는 지금 판의 골드로 내고 받음
+  const marketModal = document.getElementById("market-modal");
+  const marketBody = document.getElementById("market-body");
+  const marketMsg = document.getElementById("market-msg");
+  const MARKET_ERRORS = {
+    login_required: "거래하려면 계정을 연결해야 해요. (거래 수수료를 캐시로 내요)",
+    bad_item: "확인할 수 없는 아이템이라 올릴 수 없어요.",
+    old_item: "예전 규칙으로 만든 아이템은 거래할 수 없어요.",
+    cash_required: "레전더리·세트 아이템은 캐시를 1개 이상 받아야 해요.",
+    bad_price: "가격을 확인해 주세요. (골드나 캐시 중 하나는 1 이상, 정수)",
+    too_many: "한 번에 올릴 수 있는 개수를 넘었어요. 내 거래에서 내리거나 팔릴 때까지 기다려 주세요.",
+    already_listed: "이미 거래소에 올린 아이템이에요.",
+    in_mail: "우편함에 같은 아이템이 있어요. 먼저 받아 주세요.",
+    not_owner: "다른 사람에게 넘어간 아이템이라 올릴 수 없어요.",
+    gone: "이미 팔렸거나 내려간 아이템이에요.",
+    own: "내가 올린 아이템은 살 수 없어요.",
+    not_enough_cash: "캐시가 부족해요. 상점에서 충전할 수 있어요.",
+    payment_failed: "캐시 결제에 실패했어요. 잠시 뒤 다시 시도해 주세요.",
+    grant_failed: "캐시를 지급하지 못했어요. 잠시 뒤 다시 받아 주세요.",
+    not_found: "이미 받았거나 없는 우편이에요.",
+    market_not_configured: "거래소 서버 설정이 아직 끝나지 않았어요.",
+    unauthorized: "로그인이 만료됐어요. 계정을 다시 연결해 주세요.",
+    token_expired: "로그인이 만료됐어요. 계정을 다시 연결해 주세요.",
+  };
+  const Market = {
+    tab: "buy", list: null, mine: null, cash: null, sel: null, busy: false, mailCount: 0, mailKnown: false,
+    filter: { slot: "", rarity: "", sort: "new" },
+    rules: { fee: 1, hours: 24, maxActive: 10, cashRequired: ["legendary", "set"] },
+  };
+
+  const priceText = (gold, cash) => [cash ? `◆ ${cash}` : null, gold ? `${gold.toLocaleString()} 골드` : null].filter(Boolean).join(" + ") || "0";
+  function leftText(ms) {
+    if (ms <= 0) return "곧 내려감";
+    const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+    return h ? `${h}시간 ${m}분 남음` : `${m}분 남음`;
+  }
+  const dateText = (ms) => ms ? new Date(ms).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+  function setMarketMsg(text, cls = "") { marketMsg.textContent = text; marketMsg.className = cls ? `msg-${cls}` : ""; }
+
+  // 서버가 준 아이템 참조로 아이템을 다시 만듦 (시드가 같으면 같은 아이템)
+  function itemFromRef(ref) {
+    if (!ref || ref.v !== 2) return null;
+    const item = RLItems.generate(ref.seed, ref.src, ref.lvl);
+    if (item.id !== ref.id) return null;
+    item.enh = ref.enh || 0;
+    if (ref.tries) item.tries = ref.tries;
+    return item;
+  }
+
+  function setMailCount(n) {
+    if (n > Market.mailCount && Market.mailKnown) log("우편함에 새 우편이 왔다. (로비 오른쪽 우편함)", "good");
+    Market.mailCount = n;
+    Market.mailKnown = true;
+    const label = n ? `우편함 (${n})` : "우편함";
+    document.getElementById("mail-btn").textContent = n ? `우편함 ${n}통 (M)` : "우편함 (M)";
+    document.getElementById("tp-mail").textContent = label;
+    const tab = document.querySelector('#market-tabs [data-tab="mail"]');
+    if (tab) tab.textContent = label;
+  }
+
+  async function marketCall(route, { body, params } = {}) {
+    if (!RANKING_API) throw new Error("거래소 서버가 설정되지 않았어요.");
+    const headers = await serverHeaders();
+    if (!headers) throw new Error(MARKET_ERRORS.unauthorized);
+    let url = rankingUrl(route);
+    const q = params ? new URLSearchParams(params).toString() : "";
+    if (q) url += (url.includes("?") ? "&" : "?") + q;
+    const res = await fetch(url, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined });
+    let data = null;
+    try { data = await res.json(); } catch {}
+    if (!res.ok) throw Object.assign(new Error(MARKET_ERRORS[data?.error] || `요청 실패 (${res.status})`), { code: data?.error });
+    return data;
+  }
+
+  async function loadCash() {
+    if (!Account.loggedIn()) { Market.cash = null; return; }
+    try {
+      const b = await storeCall("/user/virtual_currency_balance");
+      Market.cash = Number(b.items?.find(i => i.sku === REVIVE.cash)?.amount || 0);
+    } catch { Market.cash = null; }
+  }
+  async function loadMine() {
+    if (!Account.loggedIn()) { Market.mine = null; return; }
+    Market.mine = await marketCall("market_mine");
+    setMailCount(Market.mine.mail.length);
+  }
+  const keepRules = (d) => { for (const k of Object.keys(Market.rules)) if (d[k] !== undefined) Market.rules[k] = d[k]; };
+
+  function openMarket(tab = "buy") {
+    if (scene !== "lobby") return;
+    Market.tab = tab;
+    marketModal.hidden = false;
+    setMarketMsg("");
+    renderMarket();
+    refreshMarket();
+  }
+  function closeMarket() { marketModal.hidden = true; }
+
+  // 지금 탭에 필요한 것을 서버에서 다시 불러옴
+  async function refreshMarket() {
+    const tab = Market.tab;
+    const jobs = [loadCash()];
+    if (tab === "buy") jobs.push(marketCall("market", { params: Market.filter }).then(d => { Market.list = d; keepRules(d); }));
+    else jobs.push(loadMine().then(() => { if (Market.mine) keepRules(Market.mine); }));
+    try { await Promise.all(jobs); } catch (e) { setMarketMsg(e.message, "bad"); }
+    if (!marketModal.hidden && Market.tab === tab) renderMarket();
+  }
+
+  function renderMarket() {
+    for (const b of document.querySelectorAll("#market-tabs button")) b.classList.toggle("on", b.dataset.tab === Market.tab);
+    const wallet = document.getElementById("market-wallet");
+    wallet.replaceChildren(`이번 판 골드 ${player.gold.toLocaleString()} · `,
+      Account.loggedIn() ? el("span", { className: "cash" }, `캐시 ◆ ${Market.cash ?? "…"}`) : "캐시: 계정 연결 필요");
+    const views = { buy: viewBuy, sell: viewSell, mine: viewMine, mail: viewMail };
+    marketBody.replaceChildren(...views[Market.tab]());
+  }
+
+  const loginNote = (text) => [
+    el("p", { className: "market-note" }, text),
+    el("button", { type: "button", className: "primary", onclick: () => { closeMarket(); openLogin(); } }, "계정 연결"),
+  ];
+  const marketEmpty = (text) => el("p", { className: "market-empty" }, text);
+  const viewRow = (name, color, meta, action) => el("div", { className: "market-row" },
+    el("div", { className: "grow" }, el("div", { style: { color } }, name), el("div", { className: "meta" }, meta)), action);
+
+  // ---- 구매 ----
+  function viewBuy() {
+    const f = Market.filter;
+    const pick = (key, options) => el("select", { ariaLabel: key, onchange: (e) => { f[key] = e.target.value; refreshMarket(); } },
+      ...options.map(([v, label]) => el("option", { value: v, selected: f[key] === v }, label)));
+    const filters = el("div", { className: "market-filters" },
+      pick("slot", [["", "모든 부위"], ...RLItems.SLOTS.map(s => [s, RLItems.SLOT_NAMES[s]])]),
+      pick("rarity", [["", "모든 등급"], ...RARITY_ORDER.map(r => [r, RLItems.RARITIES[r].name])]),
+      pick("sort", [["new", "최신순"], ["cash", "캐시 낮은 순"], ["gold", "골드 낮은 순"]]),
+      el("button", { type: "button", onclick: () => refreshMarket() }, "새로고침"));
+    const note = el("p", { className: "market-note" },
+      `모든 거래에 수수료 ◆${Market.rules.fee}이 붙어요 (사는 사람이 가격에 더해 내요). 골드는 지금 판의 골드로 내요.`,
+      Account.loggedIn() ? "" : " 사려면 계정을 연결해야 해요.");
+    const d = Market.list;
+    if (!d) return [filters, note, marketEmpty("불러오는 중…")];
+    if (!d.rows.length) return [filters, note, marketEmpty("올라온 아이템이 없어요.")];
+    return [filters, note, el("div", { className: "shop-grid" }, ...d.rows.map(r => listingCard(r, d.now)))];
+  }
+
+  function listingCard(r, now) {
+    const item = itemFromRef(r.ref);
+    const name = item ? RLItems.itemName(item) : r.item.name;
+    const total = r.cash + r.fee;
+    let label = `구매 · ◆${total}${r.gold ? ` + ${r.gold.toLocaleString()} 골드` : ""}`;
+    let disabled = Market.busy;
+    if (r.mine) { label = "내가 올린 아이템"; disabled = true; }
+    else if (!Account.loggedIn()) label = "계정 연결하고 사기";
+    else if (r.gold > player.gold) { label = "골드 부족"; disabled = true; }
+    else if (Market.cash != null && Market.cash < total) { label = `캐시 부족 (◆${total} 필요)`; disabled = true; }
+    const kind = item?.type ? RLItems.WEAPONS[item.type].name : r.item.slotName;
+    return el("div", { className: `shop-card${r.mine ? " mine" : ""}${item?.ancient ? " ancient" : ""}` },
+      el("h3", { className: item?.ancient ? "ancient-name" : "", style: { color: RLItems.RARITIES[r.item.rarity]?.color } }, name),
+      el("span", { className: "meta" }, `${r.item.rarityName} · ${kind} · Lv${r.item.lvl}`),
+      ...(item ? statLines(item, "span") : []),
+      el("span", { className: "who" }, `판매자 ${r.seller} · ${leftText(r.expiresAt - now)}`),
+      el("span", { className: "price" }, priceText(r.gold, r.cash), el("span", { className: "meta" }, ` + 수수료 ◆${r.fee}`)),
+      el("button", { type: "button", className: r.mine ? "" : "primary", disabled, onclick: () => buyListing(r, name) }, label));
+  }
+
+  async function buyListing(r, name) {
+    if (!Account.loggedIn()) { closeMarket(); openLogin(); return; }
+    if (Market.busy) return;
+    if (r.gold && gameOver) { setMarketMsg("쓰러진 판의 골드는 쓸 수 없어요. 새로 시작하거나 부활한 뒤 사 주세요.", "bad"); return; }
+    const total = r.cash + r.fee;
+    const lines = [`${name}을(를) 살까요?`, "", r.gold ? `골드 ${r.gold.toLocaleString()}` : null, `캐시 ◆${r.cash} + 수수료 ◆${r.fee} = ◆${total}`];
+    if (!confirm(lines.filter(x => x !== null).join("\n"))) return;
+    Market.busy = true;
+    setMarketMsg("구매하는 중…");
+    renderMarket();
+    try {
+      const res = await marketCall("market_buy", { body: { id: r.id } });
+      if (r.gold) { player.gold = Math.max(0, player.gold - r.gold); updateStats(); saveGame(true); }
+      log(`거래소에서 ${name}을(를) 샀다. (${priceText(r.gold, total)}, 수수료 포함)`, "good");
+      // 산 아이템은 우편함으로 옴 → 가방에 자리가 있으면 바로 받음
+      let got = false;
+      try { await loadMine(); got = await claimMail(res.mail, { quiet: true }); } catch {}
+      setMarketMsg(got ? `${name}을(를) 샀어요! 가방에 넣었어요.` : `${name}을(를) 샀어요! 우편함에 있어요. 가방을 정리한 뒤 받아 주세요.`, "good");
+    } catch (e) {
+      setMarketMsg(e.message, "bad");
+    } finally {
+      Market.busy = false;
+      await refreshMarket();
+    }
+  }
+
+  // ---- 판매 등록 ----
+  function viewSell() {
+    if (!Account.loggedIn()) return loginNote("아이템을 올리려면 계정을 연결해야 해요. 판매 대금(캐시)을 계정으로 받아요.");
+    const active = Market.mine?.active.length ?? 0;
+    const max = Market.rules.maxActive;
+    const bag = Inv.bag().slice().sort((a, b) => RARITY_ORDER.indexOf(a.rarity) - RARITY_ORDER.indexOf(b.rarity) || b.lvl - a.lvl);
+    const parts = [el("p", { className: "market-note" },
+      `가방의 아이템을 올릴 수 있어요 (장착 중인 아이템은 먼저 해제하세요). 지금 ${active}/${max}개 올라가 있어요. ${Market.rules.hours}시간 안에 안 팔리면 우편함으로 돌아와요.`)];
+    if (!bag.length) return [...parts, marketEmpty("가방이 비어 있어요.")];
+    parts.push(el("div", { className: "bag" }, ...bag.map(item => el("button", {
+      type: "button", className: `bag-item${Market.sel === item.id ? " sel" : ""}${item.ancient ? " ancient" : ""}`,
+      onclick: () => { Market.sel = item.id; setMarketMsg(""); renderMarket(); },
+    }, itemLabel(item), el("small", {}, ` Lv${item.lvl}`)))));
+    const item = bag.find(x => x.id === Market.sel);
+    if (!item) return [...parts, el("p", { className: "market-note" }, "올릴 아이템을 고르세요.")];
+    const needCash = Market.rules.cashRequired.includes(item.rarity);
+    const old = item.v !== 2;
+    const gold = el("input", { type: "number", min: 0, step: 1, inputMode: "numeric", id: "sell-gold", value: "0" });
+    const cash = el("input", { type: "number", min: needCash ? 1 : 0, step: 1, inputMode: "numeric", id: "sell-cash", value: needCash ? "1" : "0" });
+    const blocked = old ? "예전 규칙 아이템은 올릴 수 없어요" : active >= max ? `${max}개까지 올릴 수 있어요` : null;
+    parts.push(el("div", { className: "detail" },
+      el("h3", {}, itemLabel(item)), ...statLines(item),
+      el("div", { className: "sell-form" },
+        el("label", {}, "골드 가격", gold),
+        el("label", {}, "캐시 가격 (◆)", cash),
+        el("p", { className: "market-note full" },
+          needCash ? `${RLItems.RARITIES[item.rarity].name} 아이템은 캐시를 1개 이상 받아야 해요. ` : "",
+          `사는 사람은 가격에 수수료 ◆${Market.rules.fee}을 더 내요. 팔리면 대금이 우편함으로 와요.`),
+        el("button", { type: "button", id: "sell-submit", className: "primary full", disabled: Market.busy || !!blocked, onclick: () => listItem(item, gold.value, cash.value) },
+          blocked || "거래소에 올리기"))));
+    return parts;
+  }
+
+  async function listItem(item, goldText, cashText) {
+    const gold = Number(goldText), cash = Number(cashText);
+    if (![gold, cash].every(n => Number.isInteger(n) && n >= 0) || gold + cash <= 0) { setMarketMsg(MARKET_ERRORS.bad_price, "bad"); return; }
+    if (Market.rules.cashRequired.includes(item.rarity) && cash < 1) { setMarketMsg(MARKET_ERRORS.cash_required, "bad"); return; }
+    const name = RLItems.itemName(item);
+    if (!confirm(`${name}을(를) ${priceText(gold, cash)}에 올릴까요?\n${Market.rules.hours}시간 안에 안 팔리면 우편함으로 돌아와요.`)) return;
+    Market.busy = true;
+    setMarketMsg("올리는 중…");
+    renderMarket();
+    try {
+      const ref = { seed: item.seed, src: item.src, lvl: item.lvl, v: item.v, enh: item.enh || 0, id: item.id, tries: item.tries || 0 };
+      const r = await marketCall("market_list", { body: { item: ref, gold, cash, stage: Math.max(bestDepth, depth || 0) } });
+      Inv.remove(item.id, "list", { listing: r.listing.id, gold, cash });
+      Market.sel = null;
+      log(`거래소에 ${name}을(를) ${priceText(gold, cash)}에 올렸다.`, "info");
+      setMarketMsg(`올렸어요! ${Market.rules.hours}시간 동안 거래소에 있어요.`, "good");
+      Ranking.schedule();
+    } catch (e) {
+      setMarketMsg(e.message, "bad");
+    } finally {
+      Market.busy = false;
+      try { await loadMine(); } catch {}
+      renderMarket();
+    }
+  }
+
+  // ---- 내 거래 ----
+  function viewMine() {
+    if (!Account.loggedIn()) return loginNote("내 거래는 계정을 연결하면 볼 수 있어요.");
+    const d = Market.mine;
+    if (!d) return [marketEmpty("불러오는 중…")];
+    const color = (v) => RLItems.RARITIES[v.rarity]?.color;
+    const active = d.active.map(l => viewRow(l.item.name, color(l.item),
+      `${priceText(l.gold, l.cash)} · ${l.state === "buying" ? "거래 중" : leftText(l.expiresAt - d.now)}`,
+      l.state === "active" ? el("button", { type: "button", disabled: Market.busy, onclick: () => cancelListing(l) }, "내리기") : null));
+    const histText = (h) => {
+      const when = dateText(h.endedAt);
+      if (h.state === "sold") return h.role === "seller"
+        ? `판매 완료 · ${priceText(h.gold, h.cash)} · 구매자 ${h.buyer} · ${when}`
+        : `구매 · ${priceText(h.gold, h.cash + h.fee)} (수수료 포함) · 판매자 ${h.seller} · ${when}`;
+      return h.state === "expired" ? `${Market.rules.hours}시간이 지나 우편함으로 · ${when}` : `내림 · ${when}`;
+    };
+    return [
+      el("h3", { className: "sub" }, `올린 아이템 (${d.active.length}/${Market.rules.maxActive})`),
+      d.active.length ? el("div", { className: "market-list" }, ...active) : marketEmpty("올린 아이템이 없어요."),
+      el("h3", { className: "sub" }, "지난 거래"),
+      d.history.length ? el("div", { className: "market-list" }, ...d.history.map(h => viewRow(h.item.name, color(h.item), histText(h), null))) : marketEmpty("아직 거래가 없어요."),
+    ];
+  }
+
+  async function cancelListing(l) {
+    if (Market.busy || !confirm(`${l.item.name}을(를) 거래소에서 내릴까요? 우편함으로 돌아와요.`)) return;
+    Market.busy = true;
+    try {
+      await marketCall("market_cancel", { body: { id: l.id } });
+      setMarketMsg(`${l.item.name}을(를) 내렸어요. 우편함에서 받을 수 있어요.`, "good");
+    } catch (e) {
+      setMarketMsg(e.message, "bad");
+    } finally {
+      Market.busy = false;
+      await refreshMarket();
+    }
+  }
+
+  // ---- 우편함 ----
+  function viewMail() {
+    if (!Account.loggedIn()) return loginNote("우편함은 계정을 연결하면 쓸 수 있어요.");
+    const d = Market.mine;
+    const head = el("p", { className: "market-note" },
+      `가방 ${Inv.bag().length}/${BAG_SIZE}칸 · 팔린 대금, 산 아이템, ${Market.rules.hours}시간이 지나거나 내린 아이템이 여기로 와요. 가방이 가득 차면 인벤토리에서 정리한 뒤 받으세요.`);
+    if (!d) return [head, marketEmpty("불러오는 중…")];
+    if (!d.mail.length) return [head, marketEmpty("우편함이 비어 있어요.")];
+    const kinds = { sale: "판매 대금", bought: "산 아이템", returned: "돌아온 아이템" };
+    const rows = d.mail.map(m => {
+      const sale = m.kind === "sale";
+      return viewRow(sale ? priceText(m.gold, m.cash) : m.itemName, sale ? "#ffcf5c" : RLItems.RARITIES[m.rarity]?.color,
+        [kinds[m.kind] || "우편", sale ? m.itemName : null, m.note, dateText(m.createdAt)].filter(Boolean).join(" · "),
+        el("button", { type: "button", className: "primary", disabled: Market.busy, onclick: () => claimOne(m.id) }, "받기"));
+    });
+    return [head, el("button", { type: "button", id: "mail-all", disabled: Market.busy, onclick: claimAll, style: { marginBottom: "8px" } }, "모두 받기"),
+      el("div", { className: "market-list" }, ...rows)];
+  }
+
+  // 우편 1개 받기: 아이템은 가방으로, 골드는 지금 판으로, 캐시는 서버가 Xsolla로 지급. 받았으면 true
+  async function claimMail(id, { quiet = false } = {}) {
+    const m = Market.mine?.mail.find(x => x.id === id);
+    if (!m) return false;
+    const fail = (text) => { if (!quiet) setMarketMsg(text, "bad"); return false; };
+    let item = null;
+    if (m.ref) {
+      item = itemFromRef(m.ref);
+      if (!item) return fail("이 아이템을 만들 수 없어요. 게임을 새로고침한 뒤 다시 받아 주세요.");
+      if (Inv.items().some(x => x.id === item.id)) return fail("가방에 같은 아이템이 이미 있어요.");
+      if (Inv.full()) return fail(`가방이 가득 찼어요 (${BAG_SIZE}칸). 인벤토리에서 정리한 뒤 받아 주세요.`);
+    }
+    if (m.gold && gameOver) return fail("쓰러진 판에는 골드를 받을 수 없어요. 새로 시작하거나 부활한 뒤 받아 주세요.");
+    await marketCall("mail_claim", { body: { id } });
+    if (item) Inv.add(item, { from: "market", kind: m.kind, mail: id });
+    if (m.gold) { player.gold += m.gold; updateStats(); saveGame(true); }
+    if (m.cash) await loadCash();
+    Market.mine.mail = Market.mine.mail.filter(x => x.id !== id);
+    setMailCount(Market.mine.mail.length);
+    const what = [item ? RLItems.itemName(item) : null, m.gold ? `${m.gold.toLocaleString()} 골드` : null, m.cash ? `캐시 ◆${m.cash}` : null].filter(Boolean).join(", ");
+    log(`우편함에서 ${what}을(를) 받았다.`, "good");
+    if (!quiet) setMarketMsg(`${what}을(를) 받았어요.`, "good");
+    if (item) Ranking.schedule();
+    return true;
+  }
+
+  async function claimOne(id) {
+    if (Market.busy) return;
+    Market.busy = true;
+    renderMarket();
+    try { await claimMail(id); } catch (e) { setMarketMsg(e.message, "bad"); }
+    Market.busy = false;
+    renderMarket();
+  }
+
+  async function claimAll() {
+    if (Market.busy || !Market.mine) return;
+    Market.busy = true;
+    renderMarket();
+    let got = 0;
+    try {
+      for (const m of [...Market.mine.mail]) if (await claimMail(m.id, { quiet: true })) got++;
+      const left = Market.mine.mail.length;
+      setMarketMsg(left ? `${got}개 받았어요. ${left}개는 가방이 가득 차서 남았어요. 인벤토리에서 정리한 뒤 받아 주세요.` : `${got}개 모두 받았어요.`, left ? "bad" : "good");
+    } catch (e) {
+      setMarketMsg(e.message, "bad");
+    }
+    Market.busy = false;
+    renderMarket();
+  }
+
+  for (const b of document.querySelectorAll("#market-tabs button")) {
+    b.addEventListener("click", () => { Market.tab = b.dataset.tab; setMarketMsg(""); renderMarket(); refreshMarket(); });
+  }
+  document.getElementById("market-close").addEventListener("click", closeMarket);
+  marketModal.addEventListener("click", (e) => { if (e.target === marketModal) closeMarket(); });
+  document.getElementById("market-btn").addEventListener("click", (e) => { e.currentTarget.blur(); openMarket("buy"); });
+  document.getElementById("mail-btn").addEventListener("click", (e) => { e.currentTarget.blur(); openMarket("mail"); });
+  document.getElementById("tp-market").addEventListener("click", () => openMarket("buy"));
+  document.getElementById("tp-mail").addEventListener("click", () => openMarket("mail"));
+
   // ---- 터치 조작 ----
   // 방향 버튼: 누르면 한 칸, 누르고 있으면 0.3초 뒤부터 계속 이동. 창이 열려 있으면 움직이지 않음
-  const anyModalOpen = () => !modal.hidden || !invModal.hidden || !dexModal.hidden || !shopModal.hidden;
+  const anyModalOpen = () => !modal.hidden || !invModal.hidden || !dexModal.hidden || !shopModal.hidden || !marketModal.hidden;
   const pad = document.getElementById("touch-pad");
   let holdTimer = null;
   const stopHold = () => { clearTimeout(holdTimer); clearInterval(holdTimer); holdTimer = null; };
@@ -2553,6 +3015,11 @@
       if (e.key === "Escape") { e.preventDefault(); closeShop(); }
       return;
     }
+    // 거래소 창: 가격 입력 중에도 캐릭터가 움직이지 않게 여기서 끝냄
+    if (!marketModal.hidden && modal.hidden) {
+      if (e.key === "Escape") { e.preventDefault(); closeMarket(); }
+      return;
+    }
     if (!dexModal.hidden) {
       if (e.key === "Escape" || e.key.toLowerCase() === "b") { e.preventDefault(); closeDex(); }
       return;
@@ -2576,6 +3043,8 @@
       case "q":                    usePotion(); break;
       case "r":                    restart(); break;
       case "l":                    leaveDungeon(); break;
+      case "t":                    if (scene === "lobby") openMarket("buy"); else handled = false; break;
+      case "m":                    if (scene === "lobby") openMarket("mail"); else handled = false; break;
       default: handled = false;
     }
     if (handled) e.preventDefault();

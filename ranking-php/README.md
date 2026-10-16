@@ -39,6 +39,12 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 | `GET api.php?r=me` | 내 순위 |
 | `GET api.php?r=player&id=<공개 ID>` | 그 사람이 최고 층을 세운 순간의 장비·능력치, 최강 아이템 |
 | `POST api.php?r=lobby` `{ scene: "lobby", x, y }` 또는 `{ scene: "dungeon", depth }` | 로비 위치(또는 탐험 중인 층)를 알리고, 지금 접속 중인 사람들을 받음 |
+| `GET api.php?r=market&slot=&rarity=&sort=new\|cash\|gold` | 거래소에 올라온 아이템 (누구나) |
+| `POST api.php?r=market_list` `{ item, gold, cash, stage }` | 아이템 올리기 (로그인) |
+| `POST api.php?r=market_cancel` `{ id }` | 내 아이템 내리기 → 우편함 |
+| `POST api.php?r=market_buy` `{ id }` | 사기: 캐시(가격 + 수수료 1)를 Xsolla에서 차감 |
+| `GET api.php?r=market_mine` | 내가 올린 아이템, 지난 거래, 우편함 |
+| `POST api.php?r=mail_claim` `{ id }` | 우편 받기 (판매 캐시는 이때 Xsolla로 지급) |
 
 ## 로비 (지금 접속 중인 사람)
 
@@ -57,13 +63,33 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 - 한계: 시드 규칙이 공개돼 있어서, 좋은 아이템이 나오는 시드를 오프라인에서 찾아 보내는 것까지는 막지 못해요 (실제 획득 기록을 서버가 받아야 막을 수 있어요). 강화 단계와 최고 층도 게임이 보내는 값이에요
 - `items.js`의 규칙을 바꾸면 `rules.php`도 같이 바꿔야 해요 (다르면 정상 아이템이 거부돼요)
 
+## 거래소와 우편함
+
+- 로비의 거래소에서 가방의 아이템을 골드·캐시 가격으로 올리고, 다른 사람이 사요. 거래는 **로그인 사용자만** (캐시 수수료 때문)
+- **수수료**: 모든 거래에 캐시 1. 사는 사람이 가격에 더해 내요 (가격 ◆3 → ◆4 차감). 판매자는 정한 가격을 그대로 받아요
+- **레전더리·세트** 아이템은 캐시 가격이 1 이상이어야 해요
+- 캐시 차감: 서버가 **구매자의 로그인 토큰**으로 Xsolla 인벤토리의 가상 화폐를 사용(consume)해요. 별도 아이템이 필요 없어요
+- 판매 대금: 판매자 **우편함**으로 가요. 받을 때 서버가 **프로젝트 API 키**로 Xsolla에 캐시를 지급(reward)해요 → `config.php`에 `xsolla_api_key`가 있어야 해요
+- 산 아이템, 내린 아이템, **24시간이 지나 안 팔린 아이템**도 우편함으로 가요. 가방(48칸)이 가득 차면 정리한 뒤 받아요
+- 한 사람이 동시에 올릴 수 있는 건 10개
+- 서버에 남는 것: 아이템(시드로 다시 만든 정보), 판매자·구매자(내부 키와 가린 이름), 골드·캐시 가격, 수수료, 올린·팔린·끝난 시간 (`listings` 표), 우편(`mail` 표), 아이템 ID별 주인(`item_owner` 표). Xsolla 사용자 ID·이메일·토큰은 저장하지 않아요
+- 복사 방지: 아이템 ID는 시드에서 정해져서 복사본도 ID가 같아요. 남에게 넘어간 아이템은 원래 주인이 다시 올릴 수 없고, 랭킹에서도 인정하지 않아요
+- 한계: 골드는 게임(브라우저)에 저장되는 값이라 서버가 잔액을 확인할 수 없어요. 캐시는 Xsolla가 확인해요
+
+### 설정 (`config.php`에 추가)
+
+```php
+    'xsolla_api_key' => '<프로젝트 API 키>',   // Publisher Account → 프로젝트 설정 → API 키. 판매 대금 지급에 필요
+    // 'xsolla_project_id' => 317991,           // 기본값. 다른 Store 프로젝트를 쓸 때만
+```
+
 ## 업데이트
 
 서버에 이미 올려 둔 경우, 새 파일만 덮어써요 (`config.php`와 `data/`는 그대로).
 
 ```bash
 cd /tmp && rm -rf dungeon && git clone --depth 1 https://github.com/hucksoon/hucksoon.git dungeon
-sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /var/www/html/ranking/
+sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /tmp/dungeon/ranking-php/market.php /var/www/html/ranking/
 ```
 
 DB 표는 다음 요청 때 새 칸이 자동으로 추가돼요.
