@@ -72,6 +72,10 @@ function market_tables(PDO $pdo): void {
         owner_key   VARCHAR(64) NOT NULL,
         updated_at  BIGINT NOT NULL
     )');
+    // 나중에 추가된 칸: 캐시를 지급한 시각(우편), 캐시를 받은 시각(구매). 다음 단계가 실패해도 다시 지급·결제하지 않게
+    foreach (['mail' => 'granted_at BIGINT', 'listings' => 'paid_at BIGINT'] as $table => $col) {
+        try { $pdo->exec("ALTER TABLE {$table} ADD COLUMN {$col}"); } catch (PDOException $e) { /* 이미 있음 */ }
+    }
     foreach ([
         'CREATE INDEX idx_listings_state ON listings (state, expires_at)',
         'CREATE INDEX idx_listings_seller ON listings (seller_key, state)',
@@ -101,9 +105,7 @@ function require_user(): array {
 
 // 다른 사람이 주인으로 기록된 아이템인지 (남에게 판 아이템의 복사본)
 function owned_by_other(string $itemId, string $key): bool {
-    $st = db()->prepare('SELECT owner_key FROM item_owner WHERE item_id = ?');
-    $st->execute([$itemId]);
-    $owner = $st->fetchColumn();
+    $owner = q_val('SELECT owner_key FROM item_owner WHERE item_id = ?', [$itemId]);
     return $owner !== false && $owner !== $key;
 }
 
@@ -127,13 +129,11 @@ function add_mail(string $owner, string $kind, array $f, int $now): string {
 
 // 등록 시간이 지난 아이템은 판매자 우편함으로
 function market_expire(): void {
-    $pdo = db();
     $now = now_ms();
-    $st = $pdo->prepare("SELECT * FROM listings WHERE state = 'active' AND expires_at <= ? LIMIT 200");
+    $st = db()->prepare("SELECT * FROM listings WHERE state = 'active' AND expires_at <= ? LIMIT 200");
     $st->execute([$now]);
     foreach ($st->fetchAll() as $l) {
-        $pdo->beginTransaction();
-        try {
+        tx(function (PDO $pdo) use ($l, $now) {
             $up = $pdo->prepare("UPDATE listings SET state = 'expired', ended_at = ? WHERE id = ? AND state = 'active'");
             $up->execute([$now, $l['id']]);
             if ($up->rowCount() === 1) {
@@ -142,8 +142,18 @@ function market_expire(): void {
                     'rarity' => $l['rarity'], 'note' => MARKET_HOURS . '시간이 지나 돌아온 아이템',
                 ], $now);
             }
-            $pdo->commit();
-        } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+        });
+    }
+    // 결제 중에 멈춘 구매: 캐시를 받았으면(paid_at) 1분 뒤 거래를 마무리, 못 받았으면 2분 뒤 다시 판매 중으로
+    $st = db()->prepare("SELECT * FROM listings WHERE state = 'buying' AND buying_at < ? LIMIT 50");
+    $st->execute([$now - 60000]);
+    foreach ($st->fetchAll() as $l) {
+        if ($l['paid_at'] !== null) {
+            try { finish_sale($l); } catch (HttpError $e) { /* 다른 요청이 먼저 마무리 */ }
+        } elseif ((int)$l['buying_at'] < $now - 120000) {
+            error_log("[market] listing {$l['id']} stuck in buying without payment, back to active");
+            db()->prepare("UPDATE listings SET state = 'active', buyer_key = NULL, buyer_display = NULL, buying_at = NULL WHERE id = ? AND state = 'buying' AND paid_at IS NULL")->execute([$l['id']]);
+        }
     }
 }
 
@@ -189,7 +199,7 @@ function market_browse(): array {
     $order = ['cash' => 'price_cash ASC, price_gold ASC', 'gold' => 'price_gold ASC, price_cash ASC'][$_GET['sort'] ?? ''] ?? 'created_at DESC';
     $st = db()->prepare('SELECT * FROM listings WHERE ' . implode(' AND ', $where) . " ORDER BY {$order} LIMIT 100");
     $st->execute($args);
-    $total = (int)db()->query("SELECT COUNT(*) FROM listings WHERE state = 'active'")->fetchColumn();
+    $total = (int)q_val("SELECT COUNT(*) FROM listings WHERE state = 'active'");
     return array_merge(market_settings(), [
         'now' => now_ms(), 'total' => $total,
         'rows' => array_map(function ($l) use ($me) { return listing_out($l, $me); }, $st->fetchAll()),
@@ -207,21 +217,17 @@ function market_list(): array {
     $ref = $body['item'] ?? null;
     if (!is_array($ref) || ($ref['v'] ?? null) !== 2) throw new HttpError(400, 'old_item');
     // 아이템 레벨은 최고 층보다 높을 수 없음 (랭킹과 같은 기준). 개발자는 랭킹 기록이 없어서 제한 없음
-    $st = db()->prepare('SELECT best_stage FROM players WHERE pkey = ?');
-    $st->execute([$who['key']]);
     $stage = is_int($body['stage'] ?? null) ? min(MAX_STAGE, max(0, $body['stage'])) : 0;
-    $maxLvl = $who['developer'] ? MAX_STAGE : max((int)($st->fetchColumn() ?: 0), $stage);
+    $maxLvl = $who['developer'] ? MAX_STAGE : max((int)(q_val('SELECT best_stage FROM players WHERE pkey = ?', [$who['key']]) ?: 0), $stage);
     $item = verify_item($ref, $maxLvl);
     if (!$item) throw new HttpError(400, 'bad_item');
     if (in_array($item['rarity'], MARKET_CASH_REQUIRED, true) && $cash < 1) throw new HttpError(400, 'cash_required');
     $tries = is_int($ref['tries'] ?? null) ? max(0, min(1000, $ref['tries'])) : 0;
     $cleanRef = ['seed' => $item['seed'], 'src' => $item['src'], 'lvl' => $item['lvl'], 'v' => 2, 'enh' => $item['enh'], 'id' => $item['id'], 'tries' => $tries];
 
-    $pdo = db();
     $now = now_ms();
-    $pdo->beginTransaction();
-    try {
-        $count = function (string $sql, array $args) use ($pdo): int { $q = $pdo->prepare($sql); $q->execute($args); return (int)$q->fetchColumn(); };
+    $id = tx(function (PDO $pdo) use ($who, $item, $cleanRef, $gold, $cash, $now) {
+        $count = function (string $sql, array $args): int { return (int)q_val($sql, $args); };
         if ($count("SELECT COUNT(*) FROM listings WHERE seller_key = ? AND state IN ('active', 'buying')", [$who['key']]) >= MARKET_MAX_ACTIVE) throw new HttpError(409, 'too_many');
         if ($count("SELECT COUNT(*) FROM listings WHERE item_id = ? AND state IN ('active', 'buying')", [$item['id']]) > 0) throw new HttpError(409, 'already_listed');
         if ($count("SELECT COUNT(*) FROM mail WHERE item_id = ? AND state <> 'claimed'", [$item['id']]) > 0) throw new HttpError(409, 'in_mail');
@@ -233,32 +239,25 @@ function market_list(): array {
             $id, $item['id'], json_encode($cleanRef), json_encode(item_view($item), JSON_UNESCAPED_UNICODE), r_item_name($item), $item['rarity'], $item['slot'],
             $who['key'], $who['display'], $gold, $cash, MARKET_FEE_CASH, 'active', $now, $now + MARKET_HOURS * 3600 * 1000,
         ]);
-        $pdo->commit();
-    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
-    $st = $pdo->prepare('SELECT * FROM listings WHERE id = ?');
-    $st->execute([$id]);
-    return ['ok' => true, 'listing' => listing_out($st->fetch(), $who['key'])];
+        return $id;
+    });
+    return ['ok' => true, 'listing' => listing_out(q_row('SELECT * FROM listings WHERE id = ?', [$id]), $who['key'])];
 }
 
 function market_cancel(): array {
     $who = require_user();
     $id = (string)(read_body(512)['id'] ?? '');
-    $pdo = db();
     $now = now_ms();
-    $pdo->beginTransaction();
-    try {
-        $st = $pdo->prepare('SELECT * FROM listings WHERE id = ? AND seller_key = ?');
-        $st->execute([$id, $who['key']]);
-        $l = $st->fetch();
+    $mail = tx(function (PDO $pdo) use ($who, $id, $now) {
+        $l = q_row('SELECT * FROM listings WHERE id = ? AND seller_key = ?', [$id, $who['key']]);
         $up = $pdo->prepare("UPDATE listings SET state = 'cancelled', ended_at = ? WHERE id = ? AND seller_key = ? AND state = 'active'");
         $up->execute([$now, $id, $who['key']]);
         if (!$l || $up->rowCount() !== 1) throw new HttpError(409, 'gone');
-        $mail = add_mail($who['key'], 'returned', [
+        return add_mail($who['key'], 'returned', [
             'listing_id' => $id, 'item_id' => $l['item_id'], 'item_ref' => $l['item_ref'], 'item_name' => $l['item_name'],
             'rarity' => $l['rarity'], 'note' => '등록을 취소한 아이템',
         ], $now);
-        $pdo->commit();
-    } catch (Throwable $e) { $pdo->rollBack(); throw $e; }
+    });
     return ['ok' => true, 'mail' => $mail];
 }
 
@@ -305,53 +304,63 @@ function market_buy(): array {
     $id = (string)(read_body(512)['id'] ?? '');
     market_expire();
     $pdo = db();
-    $st = $pdo->prepare('SELECT * FROM listings WHERE id = ?');
-    $st->execute([$id]);
-    $l = $st->fetch();
-    if (!$l || $l['state'] !== 'active') throw new HttpError(409, 'gone');
-    if ($l['seller_key'] === $who['key']) throw new HttpError(400, 'own');
+    $l = q_row('SELECT * FROM listings WHERE id = ?', [$id]);
+    if (!$l) throw new HttpError(409, 'gone');
     $total = (int)$l['price_cash'] + (int)$l['fee_cash'];
-
-    // 다른 사람이 동시에 사지 못하게 먼저 잡아 둠
-    $now = now_ms();
-    $hold = $pdo->prepare("UPDATE listings SET state = 'buying', buyer_key = ?, buyer_display = ?, buying_at = ? WHERE id = ? AND state = 'active' AND expires_at > ?");
-    $hold->execute([$who['key'], $who['display'], $now, $id, $now]);
-    if ($hold->rowCount() !== 1) throw new HttpError(409, 'gone');
-    $release = function () use ($pdo, $id) {
-        $pdo->prepare("UPDATE listings SET state = 'active', buyer_key = NULL, buyer_display = NULL, buying_at = NULL WHERE id = ? AND state = 'buying'")->execute([$id]);
-    };
+    // 캐시는 이미 받았는데 기록이 안 끝난 내 구매면 결제 없이 마무리만
+    $resume = $l['state'] === 'buying' && $l['buyer_key'] === $who['key'] && $l['paid_at'] !== null;
+    if (!$resume) {
+        if ($l['state'] !== 'active') throw new HttpError(409, 'gone');
+        if ($l['seller_key'] === $who['key']) throw new HttpError(400, 'own');
+        // 다른 사람이 동시에 사지 못하게 먼저 잡아 둠
+        $now = now_ms();
+        $hold = $pdo->prepare("UPDATE listings SET state = 'buying', buyer_key = ?, buyer_display = ?, buying_at = ?, paid_at = NULL WHERE id = ? AND state = 'active' AND expires_at > ?");
+        $hold->execute([$who['key'], $who['display'], $now, $id, $now]);
+        if ($hold->rowCount() !== 1) throw new HttpError(409, 'gone');
+        $release = function () use ($pdo, $id) {
+            $pdo->prepare("UPDATE listings SET state = 'active', buyer_key = NULL, buyer_display = NULL, buying_at = NULL WHERE id = ? AND state = 'buying' AND paid_at IS NULL")->execute([$id]);
+        };
+        try {
+            $balance = cash_balance($who['token']);
+            if ($balance === null) throw new HttpError(502, 'payment_failed');
+            if ($balance < $total) throw new HttpError(402, 'not_enough_cash');
+            [$status, $text] = cash_consume($who['token'], $total);
+            if ($status < 200 || $status >= 300) {
+                error_log("[market] consume {$total} failed for listing {$id}: {$status} " . substr($text, 0, 200));
+                throw new HttpError($status === 422 ? 402 : 502, $status === 422 ? 'not_enough_cash' : 'payment_failed');
+            }
+        } catch (Throwable $e) { $release(); throw $e; }
+        // 캐시를 받았다는 것부터 바로 기록 (아래 마무리가 실패해도 다시 결제하지 않고, 1분 뒤 자동으로 마무리됨)
+        $pdo->prepare('UPDATE listings SET paid_at = ? WHERE id = ?')->execute([now_ms(), $id]);
+        $l = q_row('SELECT * FROM listings WHERE id = ?', [$id]);
+    }
     try {
-        $balance = cash_balance($who['token']);
-        if ($balance === null) throw new HttpError(502, 'payment_failed');
-        if ($balance < $total) throw new HttpError(402, 'not_enough_cash');
-        [$status, $text] = cash_consume($who['token'], $total);
-        if ($status < 200 || $status >= 300) {
-            error_log("[market] consume {$total} failed for listing {$id}: {$status} " . substr($text, 0, 200));
-            throw new HttpError($status === 422 ? 402 : 502, $status === 422 ? 'not_enough_cash' : 'payment_failed');
-        }
-    } catch (Throwable $e) { $release(); throw $e; }
-
-    // 캐시가 빠져나간 뒤: 거래 완료 기록, 구매자에게 아이템, 판매자에게 대금
-    $now = now_ms();
-    $pdo->beginTransaction();
-    try {
-        $pdo->prepare("UPDATE listings SET state = 'sold', sold_at = ?, ended_at = ? WHERE id = ?")->execute([$now, $now, $id]);
-        $mail = add_mail($who['key'], 'bought', [
-            'listing_id' => $id, 'item_id' => $l['item_id'], 'item_ref' => $l['item_ref'], 'item_name' => $l['item_name'], 'rarity' => $l['rarity'],
-            'note' => "{$l['seller_display']}에게서 산 아이템",
-        ], $now);
-        add_mail($l['seller_key'], 'sale', [
-            'listing_id' => $id, 'item_name' => $l['item_name'], 'rarity' => $l['rarity'],
-            'gold' => (int)$l['price_gold'], 'cash' => (int)$l['price_cash'], 'note' => "{$who['display']}에게 판매",
-        ], $now);
-        set_owner($l['item_id'], $who['key'], $now);
-        $pdo->commit();
+        $mail = finish_sale($l);
     } catch (Throwable $e) {
-        $pdo->rollBack();
-        error_log("[market] listing {$id} paid ({$total} cash) but not recorded: " . $e->getMessage());
+        error_log("[market] listing {$id} paid ({$total} cash) but not recorded yet (will retry): " . $e->getMessage());
         throw $e;
     }
     return ['ok' => true, 'mail' => $mail, 'gold' => (int)$l['price_gold'], 'cash' => $total];
+}
+
+// 캐시를 받은 구매를 마무리: 판매 완료 기록, 구매자에게 아이템, 판매자에게 대금. 구매자 우편 ID를 돌려줌
+function finish_sale(array $l): string {
+    return tx(function (PDO $pdo) use ($l) {
+        $now = now_ms();
+        $up = $pdo->prepare("UPDATE listings SET state = 'sold', sold_at = ?, ended_at = ? WHERE id = ? AND state = 'buying' AND paid_at IS NOT NULL");
+        $up->execute([$now, $now, $l['id']]);
+        if ($up->rowCount() !== 1) throw new HttpError(409, 'gone');
+        $mail = add_mail($l['buyer_key'], 'bought', [
+            'listing_id' => $l['id'], 'item_id' => $l['item_id'], 'item_ref' => $l['item_ref'], 'item_name' => $l['item_name'], 'rarity' => $l['rarity'],
+            'note' => "{$l['seller_display']}에게서 산 아이템",
+        ], $now);
+        add_mail($l['seller_key'], 'sale', [
+            'listing_id' => $l['id'], 'item_name' => $l['item_name'], 'rarity' => $l['rarity'],
+            'gold' => (int)$l['price_gold'], 'cash' => (int)$l['price_cash'], 'note' => "{$l['buyer_display']}에게 판매",
+        ], $now);
+        set_owner($l['item_id'], $l['buyer_key'], $now);
+        return $mail;
+    });
 }
 
 function market_mine(): array {
@@ -379,15 +388,18 @@ function mail_claim(): array {
     $who = require_user();
     $id = (string)(read_body(512)['id'] ?? '');
     $pdo = db();
-    $st = $pdo->prepare("SELECT * FROM mail WHERE id = ? AND owner_key = ? AND state = 'new'");
-    $st->execute([$id, $who['key']]);
-    $m = $st->fetch();
-    if (!$m) throw new HttpError(404, 'not_found');
-    // 먼저 "받는 중"으로 잡아서 같은 우편을 두 번 받지 못하게
-    $hold = $pdo->prepare("UPDATE mail SET state = 'claiming' WHERE id = ? AND state = 'new'");
-    $hold->execute([$id]);
-    if ($hold->rowCount() !== 1) throw new HttpError(404, 'not_found');
-    if ((int)$m['cash'] > 0) {
+    $m = q_row('SELECT * FROM mail WHERE id = ? AND owner_key = ?', [$id, $who['key']]);
+    // 새 우편, 또는 캐시는 이미 지급했는데 마무리가 안 된 우편(이어서 받기: 다시 지급하지 않음)
+    $resume = $m && $m['state'] === 'claiming' && $m['granted_at'] !== null;
+    if (!$m || ($m['state'] !== 'new' && !$resume)) throw new HttpError(404, 'not_found');
+    if (!$resume) {
+        // 먼저 "받는 중"으로 잡아서 같은 우편을 두 번 받지 못하게
+        $hold = $pdo->prepare("UPDATE mail SET state = 'claiming' WHERE id = ? AND state = 'new'");
+        $hold->execute([$id]);
+        if ($hold->rowCount() !== 1) throw new HttpError(404, 'not_found');
+    }
+    $cashNow = (int)$m['cash'] > 0 && $m['granted_at'] === null;  // 이번 요청에서 캐시를 지급하는지
+    if ($cashNow) {
         try {
             $comment = $m['kind'] === 'gift' ? "gift {$id}" : "market sale {$m['listing_id']}";
             [$status, $text] = cash_grant($who['sub'], (int)$m['cash'], $comment);
@@ -400,13 +412,15 @@ function mail_claim(): array {
             $pdo->prepare("UPDATE mail SET state = 'new' WHERE id = ?")->execute([$id]);
             throw new HttpError(502, 'grant_failed');
         }
+        // 지급했다는 것부터 바로 기록 (아래가 실패해도 다음 "받기"에서 다시 지급하지 않음)
+        $pdo->prepare('UPDATE mail SET granted_at = ? WHERE id = ?')->execute([now_ms(), $id]);
     }
-    $pdo->prepare("UPDATE mail SET state = 'claimed', claimed_at = ? WHERE id = ?")->execute([now_ms(), $id]);
-    return ['ok' => true, 'mail' => mail_out($m)];
+    $done = $pdo->prepare("UPDATE mail SET state = 'claimed', claimed_at = ? WHERE id = ? AND state = 'claiming'");
+    $done->execute([now_ms(), $id]);
+    if ($done->rowCount() !== 1) throw new HttpError(404, 'not_found');
+    return ['ok' => true, 'mail' => mail_out($m), 'cashPaid' => $cashNow ? (int)$m['cash'] : 0];
 }
 
 function mail_count(string $key): int {
-    $st = db()->prepare("SELECT COUNT(*) FROM mail WHERE owner_key = ? AND state = 'new'");
-    $st->execute([$key]);
-    return (int)$st->fetchColumn();
+    return (int)q_val("SELECT COUNT(*) FROM mail WHERE owner_key = ? AND state = 'new'", [$key]);
 }

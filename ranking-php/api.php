@@ -61,7 +61,10 @@ function db(): PDO {
         PDO::ATTR_TIMEOUT => 5,  // SQLite: 다른 요청이 쓰는 중이면 최대 5초 기다림 (로비는 1초마다 씀)
     ]);
     // SQLite는 WAL 모드로: 읽기와 쓰기가 서로 덜 막힘
-    if (strpos($cfg['db_dsn'], 'sqlite:') === 0) $pdo->exec('PRAGMA journal_mode = WAL');
+    // (이미 WAL이면 아무 일도 안 함. 새 DB에 여러 요청이 동시에 오면 하나만 바꾸고 나머지는 잠깐 실패할 수 있어서 무시)
+    if (strpos($cfg['db_dsn'], 'sqlite:') === 0) {
+        try { $pdo->exec('PRAGMA journal_mode = WAL'); } catch (PDOException $e) { /* 다른 요청이 바꾸는 중 */ }
+    }
     // 표는 처음 쓸 때 자동으로 만든다 (SQLite·MySQL 공통 문법)
     $pdo->exec('CREATE TABLE IF NOT EXISTS players (
         pkey         VARCHAR(64) PRIMARY KEY,
@@ -108,6 +111,39 @@ function db(): PDO {
         try { $pdo->exec($sql); } catch (PDOException $e) { /* 이미 있음 */ }
     }
     return $pdo;
+}
+
+// SQLite 주의: SELECT로 한 줄만 읽고 커서를 열어 두면 그 연결이 옛 읽기 시점을 붙잡고 있어서,
+// 그사이 다른 요청(1초마다 오는 로비 핑 등)이 쓰면 이 연결의 다음 쓰기가 "database is locked"로 바로 실패함.
+// 그래서 한 줄 읽기는 항상 q_row / q_val로 하고(읽고 바로 닫음), 트랜잭션은 tx()로 처음부터 쓰기 잠금을 잡음.
+function q_row(string $sql, array $args = []): ?array {
+    $st = db()->prepare($sql);
+    $st->execute($args);
+    $row = $st->fetch();
+    $st->closeCursor();
+    return $row === false ? null : $row;
+}
+function q_val(string $sql, array $args = []) {
+    $st = db()->prepare($sql);
+    $st->execute($args);
+    $v = $st->fetchColumn();
+    $st->closeCursor();
+    return $v;
+}
+function is_sqlite(): bool { return strpos((string)config()['db_dsn'], 'sqlite:') === 0; }
+// 트랜잭션: SQLite는 BEGIN IMMEDIATE(시작할 때 쓰기 잠금을 잡고, 다른 요청이 쓰는 중이면 기다림)
+function tx(callable $fn) {
+    $pdo = db();
+    $sqlite = is_sqlite();
+    if ($sqlite) $pdo->exec('BEGIN IMMEDIATE'); else $pdo->beginTransaction();
+    try {
+        $result = $fn($pdo);
+        if ($sqlite) $pdo->exec('COMMIT'); else $pdo->commit();
+        return $result;
+    } catch (Throwable $e) {
+        try { if ($sqlite) $pdo->exec('ROLLBACK'); else $pdo->rollBack(); } catch (Throwable $ignored) { /* 이미 끝남 */ }
+        throw $e;
+    }
 }
 
 // ---------------------------------------------------------------- 응답
@@ -231,9 +267,7 @@ function verify_xsolla_token(string $token): array {
 
     // 서명 키가 없으면 Xsolla에 직접 확인 (요청 제한이 있어 결과를 토큰 만료까지 재사용)
     $hash = hash('sha256', $token);
-    $st = db()->prepare('SELECT expires_at FROM token_cache WHERE token_hash = ?');
-    $st->execute([$hash]);
-    $row = $st->fetch();
+    $row = q_row('SELECT expires_at FROM token_cache WHERE token_hash = ?', [$hash]);
     if ($row && (int)$row['expires_at'] > time()) return $claims;
     [$status] = http_request('POST', config()['xsolla_validate_url'] ?? 'https://login.xsolla.com/api/token/validate', json_encode(['token' => $token]));
     if ($status < 200 || $status >= 300) throw new HttpError(401, 'bad_signature');
@@ -416,19 +450,14 @@ function submit_score(): array {
     if (strlen((string)$raw) > 8192) throw new HttpError(413, 'too_large');
     $body = json_decode((string)$raw, true);
     if (!is_array($body)) throw new HttpError(400, 'bad_json');
-    $st = $pdo->prepare('SELECT best_stage FROM players WHERE pkey = ?');
-    $st->execute([$who['key']]);
-    [$stage, $item, $snapshot] = read_score($body, (int)($st->fetchColumn() ?: 0), $who['key']);
+    [$stage, $item, $snapshot] = read_score($body, (int)(q_val('SELECT best_stage FROM players WHERE pkey = ?', [$who['key']]) ?: 0), $who['key']);
     $now = now_ms();
     $snapshot['at'] = $now;
     $gearJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE);
 
     // 최고 기록만 남김: 층은 더 높을 때, 아이템은 점수가 더 높을 때만 바꿈
-    $pdo->beginTransaction();
-    try {
-        $st = $pdo->prepare('SELECT * FROM players WHERE pkey = ?');
-        $st->execute([$who['key']]);
-        $old = $st->fetch();
+    tx(function (PDO $pdo) use ($who, $stage, $item, $now, $gearJson) {
+        $old = q_row('SELECT * FROM players WHERE pkey = ?', [$who['key']]);
         if (!$old) {
             $pdo->prepare('INSERT INTO players (pkey, pub_id, kind, display, email_hmac, best_stage, stage_at, stage_gear, item_score, item_rarity, item_enh, item_lvl, item_name, item_json, item_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([
@@ -454,11 +483,7 @@ function submit_score(): array {
                 $who['key'],
             ]);
         }
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
+    });
     return ['ok' => true, 'ranked' => true];
 }
 
@@ -490,7 +515,7 @@ function get_ranking(): array {
     $missing = db()->query('SELECT pkey FROM players WHERE pub_id IS NULL LIMIT 200')->fetchAll();
     foreach ($missing as $m) db()->prepare('UPDATE players SET pub_id = ? WHERE pkey = ?')->execute([pub_id($m['pkey']), $m['pkey']]);
     $rows = db()->query("SELECT pub_id, display, kind, best_stage, item_score, item_rarity, item_enh, item_lvl, item_name FROM players WHERE {$b['where']} ORDER BY {$b['order']} LIMIT {$limit}")->fetchAll();
-    $total = (int)db()->query("SELECT COUNT(*) AS n FROM players WHERE {$b['where']}")->fetch()['n'];
+    $total = (int)q_val("SELECT COUNT(*) FROM players WHERE {$b['where']}");
     $out = [];
     foreach ($rows as $i => $r) $out[] = row_out($r, $i + 1);
     return ['type' => $type, 'total' => $total, 'updatedAt' => now_ms(), 'rows' => $out];
@@ -499,15 +524,9 @@ function get_ranking(): array {
 function get_me(): array {
     $who = identify();
     if ($who['developer']) return ['developer' => true];
-    $st = db()->prepare('SELECT * FROM players WHERE pkey = ?');
-    $st->execute([$who['key']]);
-    $r = $st->fetch();
+    $r = q_row('SELECT * FROM players WHERE pkey = ?', [$who['key']]);
     if (!$r) return ['name' => $who['display'], 'stageRank' => null, 'itemRank' => null];
-    $ahead = function (string $sql, array $args): int {
-        $q = db()->prepare($sql);
-        $q->execute($args);
-        return (int)$q->fetch()['n'];
-    };
+    $ahead = function (string $sql, array $args): int { return (int)q_val($sql, $args); };
     $stageRank = (int)$r['best_stage'] > 0
         ? 1 + $ahead('SELECT COUNT(*) AS n FROM players WHERE best_stage > ? OR (best_stage = ? AND stage_at < ?)', [$r['best_stage'], $r['best_stage'], $r['stage_at']])
         : null;
@@ -520,9 +539,7 @@ function get_me(): array {
 function get_player(): array {
     $id = (string)($_GET['id'] ?? '');
     if (!preg_match('/^[0-9a-f]{16}$/', $id)) throw new HttpError(400, 'bad_id');
-    $st = db()->prepare('SELECT * FROM players WHERE pub_id = ?');
-    $st->execute([$id]);
-    $r = $st->fetch();
+    $r = q_row('SELECT * FROM players WHERE pub_id = ?', [$id]);
     if (!$r) throw new HttpError(404, 'not_found');
     $gear = $r['stage_gear'] ? json_decode($r['stage_gear'], true) : null;
     return [
