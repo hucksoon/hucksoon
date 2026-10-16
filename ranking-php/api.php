@@ -5,6 +5,7 @@
 //   GET  api.php?r=ranking  &type=stage|item&limit=50  랭킹 (가린 이름만)
 //   GET  api.php?r=me       내 순위
 //   GET  api.php?r=player&id=<공개 ID>  그 사람이 최고 층을 세운 순간의 장비·능력치, 최고 아이템
+//   POST api.php?r=lobby    로비 위치(또는 탐험 중인 층)를 알리고, 지금 접속 중인 사람들을 받음
 //   (서버가 PATH_INFO를 지원하면 api.php/api/score 처럼 불러도 됨)
 //
 // 누구인지는 서버가 확인한다.
@@ -55,7 +56,10 @@ function db(): PDO {
     $pdo = new PDO($cfg['db_dsn'], $cfg['db_user'] ?? null, $cfg['db_pass'] ?? null, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_TIMEOUT => 5,  // SQLite: 다른 요청이 쓰는 중이면 최대 5초 기다림 (로비는 1초마다 씀)
     ]);
+    // SQLite는 WAL 모드로: 읽기와 쓰기가 서로 덜 막힘
+    if (strpos($cfg['db_dsn'], 'sqlite:') === 0) $pdo->exec('PRAGMA journal_mode = WAL');
     // 표는 처음 쓸 때 자동으로 만든다 (SQLite·MySQL 공통 문법)
     $pdo->exec('CREATE TABLE IF NOT EXISTS players (
         pkey         VARCHAR(64) PRIMARY KEY,
@@ -76,6 +80,17 @@ function db(): PDO {
         token_hash   VARCHAR(64) PRIMARY KEY,
         expires_at   BIGINT NOT NULL
     )');
+    // 지금 접속 중인 사람: 로비 위치 또는 탐험 중인 층. 잠깐 동안만 쓰는 값이라 오래된 줄은 지움
+    $pdo->exec('CREATE TABLE IF NOT EXISTS presence (
+        pkey         VARCHAR(64) PRIMARY KEY,
+        pub_id       VARCHAR(32) NOT NULL,
+        display      VARCHAR(80) NOT NULL,
+        scene        VARCHAR(8)  NOT NULL,
+        x            INTEGER NOT NULL DEFAULT 0,
+        y            INTEGER NOT NULL DEFAULT 0,
+        depth        INTEGER NOT NULL DEFAULT 0,
+        seen_at      BIGINT NOT NULL
+    )');
     // 나중에 추가된 칸: 기존 DB에도 붙임 (이미 있으면 무시)
     foreach (['pub_id VARCHAR(32)', 'stage_gear TEXT', 'item_json TEXT'] as $col) {
         try { $pdo->exec("ALTER TABLE players ADD COLUMN {$col}"); } catch (PDOException $e) { /* 이미 있음 */ }
@@ -85,6 +100,7 @@ function db(): PDO {
         'CREATE INDEX idx_players_stage ON players (best_stage, stage_at)',
         'CREATE INDEX idx_players_item ON players (item_score, item_at)',
         'CREATE INDEX idx_players_email ON players (email_hmac)',
+        'CREATE INDEX idx_presence_seen ON presence (seen_at)',
     ] as $sql) {
         try { $pdo->exec($sql); } catch (PDOException $e) { /* 이미 있음 */ }
     }
@@ -511,6 +527,50 @@ function get_player(): array {
     ];
 }
 
+// ---------------------------------------------------------------- 로비 (지금 접속 중인 사람)
+
+// 로비에 있는 사람은 1초마다, 던전에 있는 사람은 10초마다 위치를 보냄. 이 시간 동안 소식이 없으면 나간 것으로 봄
+const LOBBY_TTL_MS = 8000;
+const DUNGEON_TTL_MS = 25000;
+
+// POST api.php?r=lobby { scene: "lobby", x, y } 또는 { scene: "dungeon", depth }
+// → 내 정보와 지금 접속 중인 사람들 (가린 이름과 공개 ID만)
+function lobby_ping(): array {
+    $who = identify();
+    $raw = file_get_contents('php://input');
+    if (strlen((string)$raw) > 1024) throw new HttpError(413, 'too_large');
+    $body = json_decode((string)$raw, true);
+    if (!is_array($body)) throw new HttpError(400, 'bad_json');
+    $scene = ($body['scene'] ?? '') === 'dungeon' ? 'dungeon' : 'lobby';
+    $int = function ($v, int $max): int { return is_int($v) ? max(0, min($max, $v)) : 0; };
+    $x = $scene === 'lobby' ? $int($body['x'] ?? 0, 63) : 0;
+    $y = $scene === 'lobby' ? $int($body['y'] ?? 0, 63) : 0;
+    $depth = $scene === 'dungeon' ? $int($body['depth'] ?? 0, MAX_STAGE) : 0;
+    $now = now_ms();
+    $pub = pub_id($who['key']);
+    $pdo = db();
+    $up = $pdo->prepare('UPDATE presence SET pub_id = ?, display = ?, scene = ?, x = ?, y = ?, depth = ?, seen_at = ? WHERE pkey = ?');
+    $up->execute([$pub, $who['display'], $scene, $x, $y, $depth, $now, $who['key']]);
+    if ($up->rowCount() === 0) {
+        try {
+            $pdo->prepare('INSERT INTO presence (pkey, pub_id, display, scene, x, y, depth, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$who['key'], $pub, $who['display'], $scene, $x, $y, $depth, $now]);
+        } catch (PDOException $e) { /* 같은 사람이 동시에 보낸 요청이 먼저 넣음 */ }
+    }
+    $pdo->prepare('DELETE FROM presence WHERE seen_at < ?')->execute([$now - 60000]);
+    $st = $pdo->prepare('SELECT pub_id, display, scene, x, y, depth FROM presence
+        WHERE (scene = ? AND seen_at >= ?) OR (scene = ? AND seen_at >= ?) ORDER BY seen_at DESC LIMIT 200');
+    $st->execute(['lobby', $now - LOBBY_TTL_MS, 'dungeon', $now - DUNGEON_TTL_MS]);
+    $players = [];
+    foreach ($st->fetchAll() as $r) {
+        $p = ['id' => $r['pub_id'], 'name' => $r['display'], 'scene' => $r['scene']];
+        if ($r['scene'] === 'lobby') { $p['x'] = (int)$r['x']; $p['y'] = (int)$r['y']; }
+        else $p['depth'] = (int)$r['depth'];
+        $players[] = $p;
+    }
+    return ['me' => ['id' => $pub, 'name' => $who['display']], 'players' => $players, 'at' => $now];
+}
+
 // ---------------------------------------------------------------- 시작
 
 try {
@@ -523,6 +583,7 @@ try {
     elseif ($route === 'ranking' && $method === 'GET') respond(200, get_ranking());
     elseif ($route === 'me' && $method === 'GET') respond(200, get_me());
     elseif ($route === 'player' && $method === 'GET') respond(200, get_player());
+    elseif ($route === 'lobby' && $method === 'POST') respond(200, lobby_ping());
     else respond(404, ['error' => 'not_found']);
 } catch (HttpError $e) {
     respond($e->status, ['error' => $e->codeName]);

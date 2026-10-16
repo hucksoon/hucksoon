@@ -38,6 +38,14 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 | `GET api.php?r=ranking&type=stage\|item&limit=50` | 랭킹 (최대 100명) |
 | `GET api.php?r=me` | 내 순위 |
 | `GET api.php?r=player&id=<공개 ID>` | 그 사람이 최고 층을 세운 순간의 장비·능력치, 최강 아이템 |
+| `POST api.php?r=lobby` `{ scene: "lobby", x, y }` 또는 `{ scene: "dungeon", depth }` | 로비 위치(또는 탐험 중인 층)를 알리고, 지금 접속 중인 사람들을 받음 |
+
+## 로비 (지금 접속 중인 사람)
+
+- 게임은 로비에서 1초마다, 던전에서는 10초마다 `lobby`를 불러요. 소식이 끊기면 로비는 8초, 던전은 25초 뒤 목록에서 빠져요
+- `presence` 표에는 내부 키(HMAC), 공개 ID, 가린 이름, 위치만 있어요. 1분 넘게 소식이 없는 줄은 지워요
+- 개발자 계정도 로비에는 보여요 (가린 이름). 랭킹에서만 빠져요
+- 접속자가 많아지면(수십 명 이상) SQLite 대신 MySQL을 쓰거나, 웹소켓 서버로 바꾸는 걸 생각해 보세요
 
 ## 장비 보기와 위조 검증 (PHP 버전에만 있음)
 
