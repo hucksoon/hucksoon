@@ -107,7 +107,7 @@ ${table(["어디서", "확률", "등급 확률"], [
   ["정예", pct(I.DROPS.elite.chance), tableRates(I.TABLES.drop)],
   ["보스", pct(I.DROPS.boss.chance), tableRates(I.TABLES.boss)],
   ["황금 고블린", `${pct(I.DROPS.golden.chance)} × ${G.drops}개`, tableRates(I.TABLES.golden)],
-  [`상점 (${I.SHOP.every}층마다, 골드)`, `진열 ${I.SHOP.slots}개`, tableRates(I.TABLES[I.SHOP.table])],
+  [`상점 (보스 전 층, 골드)`, `진열 ${I.SHOP.slots}개`, tableRates(I.TABLES[I.SHOP.table])],
   ["장비 상자 (캐시)", "-", tableRates(I.TABLES.box)],
 ])}
 `;
@@ -132,7 +132,7 @@ function expectedGold(d) {
 }
 let running = 0;
 const cumulative = Array.from({ length: 25 }, (_, i) => { running += expectedGold(i + 1).total; return running; });
-const SHOP_FLOORS = [5, 10, 15, 20, 25];
+const SHOP_FLOORS = Array.from({ length: 30 }, (_, i) => i + 1).filter(I.isShopFloor).slice(0, 5);  // 4, 9, 14, 19, 24
 
 const economyMd = `# 경제: 골드, 상점, 판매와 강화
 
@@ -172,7 +172,7 @@ ${table(["층", "더미", "처치", "보스", "황금 고블린", "합계", "1�
 
 ## 상점
 
-- ${I.SHOP.every}층마다 계단 옆 \`&\` 칸. 밟으면 열려요
+- 보스 층(${I.SHOP.every}층마다) 바로 전 층(${SHOP_FLOORS.slice(0, 3).join(", ")}…층) 계단 옆 \`&\` 칸. 밟으면 열려요
 - 황금 고블린과 같은 등급표로 ${I.SHOP.slots}개를 진열해요: ${tableRates(I.TABLES[I.SHOP.table])}
 - 진열품은 (판 ID, 층)으로 정해져서 다시 열어도 같아요. 산 칸은 "판매 완료"로 남아요
 - 가격: 등급 기본값 × (1 + 아이템 레벨당 10%), 5골드 단위. 상점 아이템 레벨 = 그 층
@@ -189,7 +189,7 @@ ${table(["등급", "기본 가격", ...SHOP_FLOORS.map(d => `${d}층`)],
 ${table(["층", ...I.SHOP.rerolls.costs.map((_, n) => `${n + 1}번째`), "3번 모두"],
   SHOP_FLOORS.map(d => { const c = I.SHOP.rerolls.costs.map((_, n) => I.rerollCost(d, n)); return [d, ...c, c.reduce((x, y) => x + y, 0)]; }))}
 
-1층부터 상점 층까지(그 층 보스 포함) 모은 평균 골드: ${SHOP_FLOORS.map(d => `${d}층 약 ${Math.round(cumulative[d - 1])}`).join(", ")} (상점에서 쓴 골드는 빼지 않은 값)
+1층부터 상점 층까지 모은 평균 골드: ${SHOP_FLOORS.map(d => `${d}층 약 ${Math.round(cumulative[d - 1])}`).join(", ")} (상점에서 쓴 골드는 빼지 않은 값)
 
 ## 판매와 강화
 

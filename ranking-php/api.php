@@ -341,8 +341,9 @@ function seed_origin_ok(int $v, string $seed, string $src, int $lvl): bool {
     if (preg_match('/^[0-9A-Za-z_-]{1,40}\|d(\d{1,5})\|p\d{1,8}$/', $seed, $m)) {           // 포션 자리
         return (int)$m[1] === $lvl && $src === 'drop' && r_drop_roll($v, $seed) < R_DROP_CHANCE['normal'];
     }
-    if (preg_match('/^[0-9A-Za-z_-]{1,40}\|shop\|d(\d{1,5})(\|r[1-3])?\|s[0-5]$/', $seed, $m)) { // 상점 (5층마다)
-        return (int)$m[1] === $lvl && $lvl % 5 === 0 && $src === 'golden';
+    if (preg_match('/^[0-9A-Za-z_-]{1,40}\|shop\|d(\d{1,5})(\|r[1-3])?\|s[0-5]$/', $seed, $m)) { // 상점
+        // 보스 층 바로 전 층(4, 9, 14…). 예전에는 보스 층(5, 10…)에 있어서 그때 산 아이템도 인정
+        return (int)$m[1] === $lvl && ($lvl % 5 === 4 || $lvl % 5 === 0) && $src === 'golden';
     }
     if (preg_match('/^box\|o[0-9A-Za-z]{1,48}\|(\d{1,2})$/', $seed, $m)) {                   // 장비 상자 (최대 50회)
         return $src === 'box' && (int)$m[1] < 50;

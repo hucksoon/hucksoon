@@ -274,13 +274,16 @@
   }
 
   // ---- 상점 ----
-  // 5층마다 계단 방에 열림. 황금 고블린과 같은 등급표(레어 이상)로 6개를 진열, 골드로 구매
+  // 보스 층(5층마다) 바로 전 층(4, 9, 14…층)의 계단 방에 열림. 보스와 싸우기 전에 장비를 갖추라고
+  // 황금 고블린과 같은 등급표(레어 이상)로 6개를 진열, 골드로 구매
   // 진열 바꾸기: 상점마다 최대 3번, 비용은 바꿀 때마다 2배이고 층마다 25%씩 비싸짐
   const SHOP = {
-    every: 5, slots: 6, table: "golden",
+    every: 5, slots: 6, table: "golden",  // every: 보스 간격. 상점은 그 전 층
     prices: { rare: 60, epic: 150, legendary: 400, set: 300 },
     rerolls: { max: 3, costs: [40, 80, 160], perFloor: 0.25 },
   };
+
+  const isShopFloor = (depth) => depth % SHOP.every === SHOP.every - 1;
 
   // 진열품은 (판 ID, 층, 진열 바꾼 횟수, 칸 번호) 시드로 정해짐. 처음 진열(0번)은 바꾼 횟수 없이 씀
   function shopStock(runId, depth, reroll = 0) {
@@ -338,7 +341,7 @@
 
   const api = {
     RULES_VERSION, SLOTS, SLOT_NAMES, WEAPONS, ARMOR, RARITIES, TABLES, DROPS, DROP_CHANCE, STATS, STAT_KEYS, SETS,
-    MAIN, MAX_ROLL_CHANCE, SELL_STONES, ENHANCE, SHOP,
+    MAIN, MAX_ROLL_CHANCE, SELL_STONES, ENHANCE, SHOP, isShopFloor,
     rngFrom, generate, rollDrop, itemName, formatStat, formatRange, totals,
     mainStatsOf, statRange, mainRange, lineRange, isAncient,
     enhanceCost, enhanceChance, rollEnhance, enhancedBase, enhancedLines, shopStock, shopPrice, rerollCost,
