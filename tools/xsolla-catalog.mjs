@@ -30,6 +30,8 @@ const CASH_PRICE = (amount) => [{ sku: CASH, amount, is_default: true, is_enable
 const GROUPS = [
   { external_id: "cash_packs", name: { en: "Cash", ko: "캐시 충전" }, order: 1 },
   { external_id: "equipment_boxes", name: { en: "Equipment boxes", ko: "장비 상자" }, order: 2 },
+  // 게임 안에서만 파는 아이템 (상점 페이지에는 보이지 않음)
+  { external_id: "game_items", name: { en: "Game items", ko: "게임 아이템", ja: "ゲームアイテム" }, order: 3 },
 ];
 
 // 1캐시 = $0.10. 패키지로만 팔기 때문에 캐시 자체는 상점에 노출하지 않음
@@ -72,6 +74,23 @@ const BOXES = [1, 10, 50].map((draws, i) => ({
   order: i + 1,
   custom_attributes: { draws },
 }));
+
+// 부활권: 쓰러졌을 때 게임 안에서만 캐시로 사서 바로 사용. 한 판에 한 번
+const REVIVE = {
+  sku: "revive",
+  name: { en: "Revive", ko: "부활권", ja: "復活チケット" },
+  description: {
+    en: "Restart the floor you fell on with full HP. Once per run.",
+    ko: "쓰러진 층을 처음부터 HP 가득 찬 채로 다시 시작해요. 한 판에 한 번만 쓸 수 있어요.",
+    ja: "倒れた階をHP満タンで最初からやり直せます。1プレイにつき1回まで。",
+  },
+  groups: ["game_items"],
+  virtual_item_type: "consumable",
+  vc_prices: CASH_PRICE(50),
+  is_enabled: true,
+  is_show_in_store: true,
+  order: 1,
+};
 
 // 패키지 보너스: +10% / +20% / +25%
 const PROMOTIONS = [
@@ -176,6 +195,10 @@ console.log("장비 상자");
 for (const b of BOXES)
   await ensurePriced(`${b.sku}  ${b.vc_prices[0].amount}캐시`, `${V2}/items/virtual_items/sku/${b.sku}`,
     `${V2}/items/virtual_items`, b, "vc_prices");
+
+console.log("게임 아이템");
+await ensurePriced(`${REVIVE.sku}  ${REVIVE.vc_prices[0].amount}캐시`, `${V2}/items/virtual_items/sku/${REVIVE.sku}`,
+  `${V2}/items/virtual_items`, REVIVE, "vc_prices");
 
 console.log("보너스 프로모션");
 const listPromos = async () => {
