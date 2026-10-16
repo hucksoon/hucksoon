@@ -415,7 +415,7 @@
   던전에서 <b>포탈</b>을 타면 골드·레벨·장비를 그대로 들고 로비로 돌아와요. 쓰러지면 골드와 레벨은 처음부터예요.<br>
   로비 왼쪽 <b>거래소($)</b>로 걸어 들어가면 아이템을 사고팔고, 그 옆 빨간 <b>우편함(✉)</b>에서 판매 대금과 돌아온 아이템을 받아요.<br>
   계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다. 쓰러진 적이 장비(<b>)</b> 무기, <b>[</b> 방어구)를 떨어뜨리기도 해요.<br>
-  금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고, 계단 옆 상점(<b>&amp;</b>)에서 골드로 장비를 살 수 있어요. 금빛 칸의 황금 고블린을 놓치지 마세요!</p>
+  금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고, 그 바로 전 층(4, 9, 14…층) 계단 옆 상점(<b>&amp;</b>)에서 골드로 장비를 살 수 있어요. 금빛 칸의 황금 고블린을 놓치지 마세요!</p>
 </div>
 
 <div id="inv-modal" class="overlay" hidden>
@@ -994,7 +994,7 @@
 
   // ---- 게임 상태 ----
   let map, visible, seen, player, enemies, items, depth, gameOver;
-  let shop = null;       // 상점 칸 { x, y } (5층마다)
+  let shop = null;       // 상점 칸 { x, y } (보스 층 바로 전 층)
   let shopBought = [];   // 이번 층 상점에서 산 칸 번호 (지금 진열 기준)
   let shopRerolls = 0;   // 이번 층 상점에서 진열을 바꾼 횟수
   let bestDepth = 0;
@@ -1095,12 +1095,12 @@
     }
     map[far.cy][far.cx] = STAIRS;
 
-    // 5층마다 계단 옆에 상점
+    // 보스 층 바로 전 층(4, 9, 14…층) 계단 옆에 상점
     shop = null;
-    if (depth % RLItems.SHOP.every === 0) {
+    if (RLItems.isShopFloor(depth)) {
       const spots = DIRS.map(([dx, dy]) => ({ x: far.cx + dx, y: far.cy + dy })).filter(p => map[p.y][p.x] === FLOOR);
       shop = spots[rnd(spots.length)] || null;
-      if (shop) log("이 층에는 상점(&)이 있다. 계단 옆에서 골드로 장비를 살 수 있다.", null, SHOP_COLOR);
+      if (shop) log("이 층에는 상점(&)이 있다. 다음 층은 보스 층! 계단 옆에서 골드로 장비를 갖추자.", null, SHOP_COLOR);
     }
 
     // 적 스폰 (층이 깊을수록 강한 종류가 더 자주, 가끔 정예)
