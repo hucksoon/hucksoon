@@ -2799,14 +2799,14 @@
     if (!Account.loggedIn()) return loginNote("우편함은 계정을 연결하면 쓸 수 있어요.");
     const d = Market.mine;
     const head = el("p", { className: "market-note" },
-      `가방 ${Inv.bag().length}/${BAG_SIZE}칸 · 팔린 대금, 산 아이템, ${Market.rules.hours}시간이 지나거나 내린 아이템이 여기로 와요. 가방이 가득 차면 인벤토리에서 정리한 뒤 받으세요.`);
+      `가방 ${Inv.bag().length}/${BAG_SIZE}칸 · 팔린 대금, 산 아이템, ${Market.rules.hours}시간이 지나거나 내린 아이템, 운영자 선물이 여기로 와요. 가방이 가득 차면 인벤토리에서 정리한 뒤 받으세요.`);
     if (!d) return [head, marketEmpty("불러오는 중…")];
     if (!d.mail.length) return [head, marketEmpty("우편함이 비어 있어요.")];
-    const kinds = { sale: "판매 대금", bought: "산 아이템", returned: "돌아온 아이템" };
+    const kinds = { sale: "판매 대금", bought: "산 아이템", returned: "돌아온 아이템", gift: "운영자 선물" };
     const rows = d.mail.map(m => {
-      const sale = m.kind === "sale";
-      return viewRow(sale ? priceText(m.gold, m.cash) : m.itemName, sale ? "#ffcf5c" : RLItems.RARITIES[m.rarity]?.color,
-        [kinds[m.kind] || "우편", sale ? m.itemName : null, m.note, dateText(m.createdAt)].filter(Boolean).join(" · "),
+      const money = !m.ref;  // 판매 대금·선물: 골드·캐시만
+      return viewRow(money ? priceText(m.gold, m.cash) : m.itemName, money ? "#ffcf5c" : RLItems.RARITIES[m.rarity]?.color,
+        [kinds[m.kind] || "우편", m.kind === "sale" ? m.itemName : null, m.kind === "gift" && m.note === "운영자 선물" ? null : m.note, dateText(m.createdAt)].filter(Boolean).join(" · "),
         el("button", { type: "button", className: "primary", disabled: Market.busy, onclick: () => claimOne(m.id) }, "받기"));
     });
     return [head, el("button", { type: "button", id: "mail-all", disabled: Market.busy, onclick: claimAll, style: { marginBottom: "8px" } }, "모두 받기"),

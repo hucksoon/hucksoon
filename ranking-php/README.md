@@ -83,13 +83,28 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
     // 'xsolla_project_id' => 317991,           // 기본값. 다른 Store 프로젝트를 쓸 때만
 ```
 
+## 운영자 선물 (테스터·이벤트 지급)
+
+서버에서 명령으로 특정 사용자의 우편함에 골드·캐시를 넣어요. 웹으로는 열리지 않아요.
+
+```bash
+cd /var/www/html/ranking
+sudo -u www-data php gift.php <이메일> <골드> <캐시> "메모"
+# 예) sudo -u www-data php gift.php tester@example.com 99999 99999 "테스터 지급"
+```
+
+- 이메일 원본은 저장하지 않아요. 랭킹 기록의 이메일 HMAC으로 사람을 찾아서, **그 계정으로 로그인해 한 번이라도 플레이한 사용자**만 찾을 수 있어요 (개발자 계정은 랭킹에 저장되지 않아서 못 찾아요)
+- 받는 사람이 로비 우편함에서 "받기"를 누르면 골드는 지금 판에 더해지고(쓰러진 판이면 새로 시작하거나 부활한 뒤), 캐시는 서버가 Xsolla로 지급해요 (`xsolla_api_key` 필요)
+- 골드는 판마다 따로라서, 쓰러진 뒤 새로 시작하면 사라져요. 캐시는 계정에 남아요
+- 기록은 `mail` 표에 `kind = 'gift'`로 남아요
+
 ## 업데이트
 
 서버에 이미 올려 둔 경우, 새 파일만 덮어써요 (`config.php`와 `data/`는 그대로).
 
 ```bash
 cd /tmp && rm -rf dungeon && git clone --depth 1 https://github.com/hucksoon/hucksoon.git dungeon
-sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /tmp/dungeon/ranking-php/market.php /var/www/html/ranking/
+sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /tmp/dungeon/ranking-php/market.php /tmp/dungeon/ranking-php/gift.php /var/www/html/ranking/
 ```
 
 DB 표는 다음 요청 때 새 칸이 자동으로 추가돼요.

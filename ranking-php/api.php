@@ -586,6 +586,9 @@ function lobby_ping(): array {
 
 // ---------------------------------------------------------------- 시작
 
+// 서버 명령(gift.php 등)이 함수만 빌려 쓸 때는 요청 처리를 하지 않음
+if (defined('RANKING_NO_ROUTE')) return;
+
 try {
     cors_headers();
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';

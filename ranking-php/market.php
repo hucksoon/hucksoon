@@ -7,6 +7,7 @@
 //   POST api.php?r=market_buy   { id }    구매: 캐시(가격 + 수수료)를 Xsolla에서 차감, 아이템은 내 우편함으로
 //   GET  api.php?r=market_mine            내 등록, 지난 거래, 우편함
 //   POST api.php?r=mail_claim   { id }    우편 받기: 아이템 참조·골드를 돌려주고, 캐시는 Xsolla로 지급
+//   (운영자 선물은 서버에서 gift.php로 우편함에 넣음)
 //
 // 원칙
 //   - 거래(등록·구매·우편)는 로그인 사용자만. 모든 거래에 캐시 수수료(MARKET_FEE_CASH)가 있어서 Xsolla 계정이 필요함
@@ -388,7 +389,8 @@ function mail_claim(): array {
     if ($hold->rowCount() !== 1) throw new HttpError(404, 'not_found');
     if ((int)$m['cash'] > 0) {
         try {
-            [$status, $text] = cash_grant($who['sub'], (int)$m['cash'], "market sale {$m['listing_id']}");
+            $comment = $m['kind'] === 'gift' ? "gift {$id}" : "market sale {$m['listing_id']}";
+            [$status, $text] = cash_grant($who['sub'], (int)$m['cash'], $comment);
         } catch (Throwable $e) {
             $pdo->prepare("UPDATE mail SET state = 'new' WHERE id = ?")->execute([$id]);
             throw $e;
