@@ -6,6 +6,7 @@
 //   GET  api.php?r=me       내 순위
 //   GET  api.php?r=player&id=<공개 ID>  그 사람이 최고 층을 세운 순간의 장비·능력치, 최고 아이템
 //   POST api.php?r=lobby    로비 위치(또는 탐험 중인 층)를 알리고, 지금 접속 중인 사람들을 받음
+//   거래소·우편함 경로는 market.php 맨 위 설명 참고
 //   (서버가 PATH_INFO를 지원하면 api.php/api/score 처럼 불러도 됨)
 //
 // 누구인지는 서버가 확인한다.
@@ -23,6 +24,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/rules.php';
+require_once __DIR__ . '/market.php';
 
 const RARITY_RANK = ['common' => 0, 'uncommon' => 1, 'rare' => 2, 'epic' => 3, 'set' => 4, 'legendary' => 5];
 const MAX_STAGE = 10000;
@@ -92,6 +94,7 @@ function db(): PDO {
         seen_at      BIGINT NOT NULL
     )');
     // 나중에 추가된 칸: 기존 DB에도 붙임 (이미 있으면 무시)
+    market_tables($pdo);
     foreach (['pub_id VARCHAR(32)', 'stage_gear TEXT', 'item_json TEXT'] as $col) {
         try { $pdo->exec("ALTER TABLE players ADD COLUMN {$col}"); } catch (PDOException $e) { /* 이미 있음 */ }
     }
@@ -169,6 +172,9 @@ function identify(): array {
         $devs = array_filter(array_map(function ($s) { return strtolower(trim($s)); }, explode(',', (string)(config()['dev_emails'] ?? ''))));
         return [
             'kind' => 'user',
+            // token·sub는 이 요청 동안만 씀 (거래소에서 Xsolla 캐시를 차감·지급할 때). 저장하지 않음
+            'token' => trim(substr($auth, 7)),
+            'sub' => (string)$claims['sub'],
             'key' => hmac_hex('u:' . $claims['sub']),
             'display' => $email !== '' ? mask_email($email) : ($phone !== '' ? mask_phone($phone) : ('사용자 #' . substr((string)$claims['sub'], 0, 6))),
             'email_hmac' => $email !== '' ? hmac_hex('e:' . $email) : null,
@@ -237,13 +243,13 @@ function verify_xsolla_token(string $token): array {
     return $claims;
 }
 
-function http_request(string $method, string $url, ?string $body = null): array {
+function http_request(string $method, string $url, ?string $body = null, array $headers = []): array {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_CUSTOMREQUEST => $method,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 8,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_HTTPHEADER => array_merge(['Content-Type: application/json'], $headers),
     ]);
     if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
     $text = curl_exec($ch);
@@ -352,7 +358,7 @@ function item_view(array $it): array {
     ];
 }
 
-function read_score(array $body, int $oldBest): array {
+function read_score(array $body, int $oldBest, string $key): array {
     $stage = $body['stage'] ?? null;
     if (!is_int($stage) || $stage < 1 || $stage > MAX_STAGE) throw new HttpError(400, 'bad_stage');
     $maxLvl = max($stage, $oldBest);
@@ -362,6 +368,8 @@ function read_score(array $body, int $oldBest): array {
     // 최고 아이템: 시드로 다시 만든 아이템만 인정 (시드가 없는 예전 형식은 무시)
     $item = null;
     $verified = verify_item($body['item'] ?? null, $maxLvl);
+    // 거래소에서 남에게 판 아이템(의 복사본)은 인정하지 않음
+    if ($verified && owned_by_other($verified['id'], $key)) $verified = null;
     if ($verified) {
         $item = [
             'rarity' => $verified['rarity'], 'enh' => $verified['enh'], 'lvl' => $verified['lvl'], 'name' => r_item_name($verified),
@@ -375,7 +383,7 @@ function read_score(array $body, int $oldBest): array {
     $rejected = 0;
     foreach (array_slice(is_array($body['gear'] ?? null) ? $body['gear'] : [], 0, 6) as $q) {
         $it = verify_item($q, $maxLvl);
-        if (!$it || isset($gear[$it['slot']])) { $rejected++; continue; }
+        if (!$it || isset($gear[$it['slot']]) || owned_by_other($it['id'], $key)) { $rejected++; continue; }
         $gear[$it['slot']] = $it;
     }
     $ordered = [];
@@ -410,7 +418,7 @@ function submit_score(): array {
     if (!is_array($body)) throw new HttpError(400, 'bad_json');
     $st = $pdo->prepare('SELECT best_stage FROM players WHERE pkey = ?');
     $st->execute([$who['key']]);
-    [$stage, $item, $snapshot] = read_score($body, (int)($st->fetchColumn() ?: 0));
+    [$stage, $item, $snapshot] = read_score($body, (int)($st->fetchColumn() ?: 0), $who['key']);
     $now = now_ms();
     $snapshot['at'] = $now;
     $gearJson = json_encode($snapshot, JSON_UNESCAPED_UNICODE);
@@ -533,7 +541,8 @@ function get_player(): array {
 const LOBBY_TTL_MS = 8000;
 const DUNGEON_TTL_MS = 25000;
 
-// POST api.php?r=lobby { scene: "lobby", x, y } 또는 { scene: "dungeon", depth }
+// POST api.php?r=lobby { scene: "lobby", x, y, portal } 또는 { scene: "dungeon", depth }
+//   portal: 로비에 있을 때 그 사람이 포탈을 타고 나온 층 (다시 들어갈 수 있는 층, 없으면 0). 머리 위에 "◎N층"으로 보임
 // → 내 정보와 지금 접속 중인 사람들 (가린 이름과 공개 ID만)
 function lobby_ping(): array {
     $who = identify();
@@ -545,7 +554,8 @@ function lobby_ping(): array {
     $int = function ($v, int $max): int { return is_int($v) ? max(0, min($max, $v)) : 0; };
     $x = $scene === 'lobby' ? $int($body['x'] ?? 0, 63) : 0;
     $y = $scene === 'lobby' ? $int($body['y'] ?? 0, 63) : 0;
-    $depth = $scene === 'dungeon' ? $int($body['depth'] ?? 0, MAX_STAGE) : 0;
+    // depth 칸: 던전이면 탐험 중인 층, 로비면 포탈 층
+    $depth = $int($body[$scene === 'dungeon' ? 'depth' : 'portal'] ?? 0, MAX_STAGE);
     $now = now_ms();
     $pub = pub_id($who['key']);
     $pdo = db();
@@ -564,11 +574,14 @@ function lobby_ping(): array {
     $players = [];
     foreach ($st->fetchAll() as $r) {
         $p = ['id' => $r['pub_id'], 'name' => $r['display'], 'scene' => $r['scene']];
-        if ($r['scene'] === 'lobby') { $p['x'] = (int)$r['x']; $p['y'] = (int)$r['y']; }
+        if ($r['scene'] === 'lobby') { $p['x'] = (int)$r['x']; $p['y'] = (int)$r['y']; $p['portal'] = (int)$r['depth']; }
         else $p['depth'] = (int)$r['depth'];
         $players[] = $p;
     }
-    return ['me' => ['id' => $pub, 'name' => $who['display']], 'players' => $players, 'at' => $now];
+    return [
+        'me' => ['id' => $pub, 'name' => $who['display']], 'players' => $players, 'at' => $now,
+        'mail' => $who['kind'] === 'user' ? mail_count($who['key']) : 0,  // 우편함에 받을 것
+    ];
 }
 
 // ---------------------------------------------------------------- 시작
@@ -584,6 +597,12 @@ try {
     elseif ($route === 'me' && $method === 'GET') respond(200, get_me());
     elseif ($route === 'player' && $method === 'GET') respond(200, get_player());
     elseif ($route === 'lobby' && $method === 'POST') respond(200, lobby_ping());
+    elseif ($route === 'market' && $method === 'GET') respond(200, market_browse());
+    elseif ($route === 'market_list' && $method === 'POST') respond(200, market_list());
+    elseif ($route === 'market_cancel' && $method === 'POST') respond(200, market_cancel());
+    elseif ($route === 'market_buy' && $method === 'POST') respond(200, market_buy());
+    elseif ($route === 'market_mine' && $method === 'GET') respond(200, market_mine());
+    elseif ($route === 'mail_claim' && $method === 'POST') respond(200, mail_claim());
     else respond(404, ['error' => 'not_found']);
 } catch (HttpError $e) {
     respond($e->status, ['error' => $e->codeName]);

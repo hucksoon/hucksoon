@@ -27,4 +27,11 @@ return [
 
     // (선택) Login 프로젝트가 HS256으로 서명하면 그 비밀 키. 비워 두면 Xsolla에 직접 확인을 요청
     'jwt_secret' => '',
+
+    // 거래소: Xsolla Store(퍼블리셔) 프로젝트 ID와 프로젝트 API 키
+    //   구매할 때 캐시 차감은 구매자 토큰으로 하므로 API 키가 필요 없지만,
+    //   판매 대금(캐시)을 판매자에게 지급하려면 API 키가 필요해요 (Publisher Account → 프로젝트 설정 → API 키)
+    'xsolla_project_id' => 317991,
+    'xsolla_api_key' => '',
+    'cash_sku' => 'cash',
 ];
