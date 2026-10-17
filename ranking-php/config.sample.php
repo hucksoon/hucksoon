@@ -34,4 +34,7 @@ return [
     'xsolla_project_id' => 317991,
     'xsolla_api_key' => '',
     'cash_sku' => 'cash',
+
+    // 광고 보상: 광고를 시작하고 최소 몇 초가 지나야 보상을 줄지 (광고를 안 보고 바로 보상을 받는 걸 막음)
+    'ad_min_seconds' => 5,
 ];

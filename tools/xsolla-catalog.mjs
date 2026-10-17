@@ -86,7 +86,7 @@ const REVIVE = {
   },
   groups: ["game_items"],
   virtual_item_type: "consumable",
-  vc_prices: CASH_PRICE(50),
+  vc_prices: CASH_PRICE(10),  // $1 (캐시 1개 = $0.10)
   is_enabled: true,
   is_show_in_store: true,
   order: 1,

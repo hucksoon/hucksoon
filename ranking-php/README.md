@@ -45,6 +45,10 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 | `POST api.php?r=market_buy` `{ id }` | 사기: 캐시(가격 + 수수료 1)를 Xsolla에서 차감 |
 | `GET api.php?r=market_mine` | 내가 올린 아이템, 지난 거래, 우편함 |
 | `POST api.php?r=mail_claim` `{ id }` | 우편 받기 (판매 캐시는 이때 Xsolla로 지급) |
+| `GET api.php?r=entry_status` | 오늘 무료 입장·광고 보상이 몇 번 남았는지 |
+| `POST api.php?r=entry` `{ adTicket? }` | 1층 문으로 새로 시작 (하루 무료 5회, 그 뒤엔 광고 티켓) |
+| `POST api.php?r=ad_start` `{ kind }` | 광고 보기 전에 티켓 받기 (entry / revive / fee) |
+| `POST api.php?r=revive_ad` `{ adTicket }` | 광고 보고 부활 |
 
 ## 로비 (지금 접속 중인 사람)
 
@@ -83,6 +87,15 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
     // 'xsolla_project_id' => 317991,           // 기본값. 다른 Store 프로젝트를 쓸 때만
 ```
 
+## 하루 입장과 광고 보상
+
+- **1층 문으로 새로 시작할 때만** 하루 입장 횟수를 세요. 하루 **5회 무료**, 그 뒤엔 광고를 봐야 들어가요 (포탈 층으로 다시 들어가는 건 세지 않아요)
+- 광고로 대신할 수 있는 것 (캐시로 하는 방법은 그대로): **부활 하루 1회**, **거래 수수료 면제 하루 3회**. 광고 입장은 하루 30회까지
+- 하루는 **한국 시간 자정**에 바뀌어요. 개발자 계정은 입장 제한이 없어요
+- 광고를 끝까지 봤다는 신호는 브라우저에서 와서 서버가 확인할 수 없어요. 그래서 광고를 시작할 때 티켓을 주고, `ad_min_seconds`(기본 5초)가 지나야 쓸 수 있게 하고, 티켓은 한 번만·그날만 쓰고, 종류마다 하루 상한을 둬요
+- 기록: `daily_entries`(사람별 하루 무료 입장 수), `ad_tickets`(광고 티켓). 3일 지난 티켓은 지워요
+- 광고 종류는 게임의 `ads-config.js`. 지금은 테스트 광고(5초 안내 화면, 수익 없음). 구글 AdSense **H5 게임 광고(보상형)** 승인을 받으면 거기에 게시자 ID를 넣어요
+
 ## 운영자 선물 (테스터·이벤트 지급)
 
 서버에서 명령으로 특정 사용자의 우편함에 골드·캐시를 넣어요. 웹으로는 열리지 않아요.
@@ -115,7 +128,7 @@ sudo -u www-data php gift.php --resume <이메일>
 
 ```bash
 cd /tmp && rm -rf dungeon && git clone --depth 1 https://github.com/hucksoon/hucksoon.git dungeon
-sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /tmp/dungeon/ranking-php/market.php /tmp/dungeon/ranking-php/gift.php /var/www/html/ranking/
+sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /tmp/dungeon/ranking-php/market.php /tmp/dungeon/ranking-php/gift.php /tmp/dungeon/ranking-php/ads.php /var/www/html/ranking/
 ```
 
 DB 표는 다음 요청 때 새 칸이 자동으로 추가돼요.
