@@ -765,7 +765,7 @@
       } catch {}
       return empty();
     }
-    const write = () => { store.set(key(owner), JSON.stringify(data)); Profile.touch(); };
+    const write = () => { store.set(key(owner), JSON.stringify(data)); Profile.touch("soon"); };
     const all = () => [...data.bag, ...Object.values(data.equip).filter(Boolean)];
     const fullEquip = (eq) => Object.fromEntries(RLItems.SLOTS.map(s => [s, eq?.[s] || null]));
 
@@ -1485,7 +1485,8 @@
     store.set(SAVE_KEY, JSON.stringify(makeSave()));
     saveLevel();
     Ranking.schedule();
-    Profile.touch();
+    // 층 이동·쓰러짐·포탈·골드 거래 같은 중요한 순간(flushNow)만 바로, 이동·전투는 1분에 한 번
+    Profile.touch(flushNow ? "soon" : "later");
     // 아래는 게임 서버가 없을 때만: 진행 상황을 Xsolla 계정 속성에 저장
     if (!cloudReady || RANKING_API) return;
     clearTimeout(cloudTimer);
@@ -1598,14 +1599,18 @@
   }
 
   // ---- 계정 저장 (게임 서버) ---- 로그인하면 가방·장착 장비·강화석·도감·진행 중인 판·상자 보관함을 서버에 저장
-  // 같은 계정이면 웹·앱·다른 기기에서 같은 데이터. 바뀌면 2초 모았다가 올림.
+  // 같은 계정이면 웹·앱·다른 기기에서 같은 데이터.
+  // 서버 요청을 줄이려고: 아이템·재화·층 이동 같은 중요한 변경은 2초 모았다가, 이동·전투(HP 등)는 1분에 한 번,
+  // 탭을 닫거나 숨길 때·로그아웃할 때는 바로. 지난번에 올린 것과 같으면 보내지 않음.
   // 서버는 저장 번호(rev)가 같을 때만 덮어씀 → 다른 기기가 먼저 저장했으면 그쪽(서버)이 기준
   // 이 기기에는 마지막으로 맞춘 저장 번호와 아직 못 올린 변경이 있는지만 기록 (rl_profile:<소유자>)
   const Profile = (() => {
     let ready = false;    // 서버와 한 번 맞춘 뒤에만 올림
     let quiet = false;    // 서버 저장본을 적용하는 동안은 변경으로 치지 않음
     let changes = 0;
-    let timer = null, pushing = null, warned = false;
+    let timer = null, due = 0, pushing = null, warned = false;
+    let lastSent = null;  // 서버와 같은 내용 (JSON). 같으면 보내지 않음
+    const DELAY = { soon: 2000, later: 60000 };
     const on = () => !!RANKING_API && Account.loggedIn();
     const metaKey = () => `rl_profile:${Inv.owner()}`;
     function meta() { try { return JSON.parse(store.get(metaKey())); } catch { return null; } }
@@ -1672,6 +1677,7 @@
         setMeta({ rev: 0, dirty: true });
         log("지금 진행 상황과 가방을 계정에 저장한다.", "good");
       }
+      lastSent = srv.data ? JSON.stringify(srv.data) : null;
       // 게스트로 모은 장비·도감을 계정으로 (방금 로그인했거나, 지난번 로그인 때 서버가 안 돼서 못 옮긴 것)
       const guest = guestOwner || inventoryOwner(false);
       if (store.get(`rl_inv:${guest}`) || store.get(`rl_dex:${guest}`)) mergeGuest(guest);
@@ -1680,13 +1686,21 @@
       await push();
     }
 
-    // 바뀐 게 있음: 저장 표시만 하고 몇 초 뒤 올림
-    function touch() {
+    // 바뀐 게 있음: 저장 표시만 하고 나중에 올림. level: "soon"(2초) | "later"(1분)
+    function touch(level = "later") {
       if (quiet || !on()) return;
       changes++;
       const m = meta() || { rev: 0 };
       if (!m.dirty) setMeta({ ...m, dirty: true });
-      if (ready && !timer && !pushing) timer = setTimeout(push, 2000);
+      if (ready) schedule(DELAY[level]);
+    }
+    // 이미 더 이른 저장이 잡혀 있으면 그대로
+    function schedule(ms) {
+      const at = Date.now() + ms;
+      if (timer && due <= at) return;
+      clearTimeout(timer);
+      due = at;
+      timer = setTimeout(() => push(), ms);
     }
 
     // 못 올린 변경을 지금 올림. keepalive: 탭을 닫거나 숨길 때
@@ -1698,28 +1712,32 @@
       if (!ready || !on() || !m?.dirty) return;
       const owner = Inv.owner();
       const sent = changes;
-      const body = JSON.stringify({ rev: m.rev, data: data() });
+      const json = JSON.stringify(data());
+      // HP처럼 바뀌었다가 그대로 돌아온 경우 등: 서버와 같으면 보내지 않음
+      if (json === lastSent) { setMeta({ ...m, dirty: false }); return; }
+      const body = `{"rev":${m.rev},"data":${json}}`;
       pushing = (async () => {
         try {
           // keepalive는 64KB까지만 됨
           const res = await call("POST", body, keepalive && body.length < 60000);
           if (Inv.owner() !== owner || !Account.loggedIn()) return;
           warned = false;
-          if (res.ok) setMeta({ rev: res.rev, dirty: changes !== sent });
+          if (res.ok) { setMeta({ rev: res.rev, dirty: changes !== sent }); lastSent = json; }
           else if (res.conflict && res.data) {
             apply(res.data, res.rev);
+            lastSent = JSON.stringify(res.data);
             log("다른 기기에서 저장한 진행 상황으로 바꿨다.", "info");
             if (scene === "lobby") renderLobby();
           } else if (res.conflict) setMeta({ rev: res.rev, dirty: true });
         } catch (e) {
           if (!warned) log(`계정에 저장하지 못했다: ${e.message} (잠시 뒤 다시 시도)`, "bad");
           warned = true;
-          if (!timer) timer = setTimeout(push, 15000);
+          schedule(15000);
           return;
         } finally {
           pushing = null;
         }
-        if (meta()?.dirty && !timer) timer = setTimeout(push, 2000);
+        if (meta()?.dirty) schedule(DELAY.later);
       })();
       return pushing;
     }
