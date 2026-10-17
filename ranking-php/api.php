@@ -6,7 +6,7 @@
 //   GET  api.php?r=me       내 순위
 //   GET  api.php?r=player&id=<공개 ID>  그 사람이 최고 층을 세운 순간의 장비·능력치, 최고 아이템
 //   POST api.php?r=lobby    로비 위치(또는 탐험 중인 층)를 알리고, 지금 접속 중인 사람들을 받음
-//   거래소·우편함 경로는 market.php, 하루 입장·광고 보상 경로는 ads.php 맨 위 설명 참고
+//   거래소·우편함 경로는 market.php, 하루 입장·광고 보상 경로는 ads.php, 계정 저장은 profile.php 맨 위 설명 참고
 //   (서버가 PATH_INFO를 지원하면 api.php/api/score 처럼 불러도 됨)
 //
 // 누구인지는 서버가 확인한다.
@@ -26,6 +26,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/rules.php';
 require_once __DIR__ . '/market.php';
 require_once __DIR__ . '/ads.php';
+require_once __DIR__ . '/profile.php';
 
 const RARITY_RANK = ['common' => 0, 'uncommon' => 1, 'rare' => 2, 'epic' => 3, 'set' => 4, 'legendary' => 5];
 const MAX_STAGE = 10000;
@@ -100,6 +101,7 @@ function db(): PDO {
     // 나중에 추가된 칸: 기존 DB에도 붙임 (이미 있으면 무시)
     market_tables($pdo);
     ads_tables($pdo);
+    profile_tables($pdo);
     foreach (['pub_id VARCHAR(32)', 'stage_gear TEXT', 'item_json TEXT'] as $col) {
         try { $pdo->exec("ALTER TABLE players ADD COLUMN {$col}"); } catch (PDOException $e) { /* 이미 있음 */ }
     }
@@ -630,6 +632,8 @@ try {
     elseif ($route === 'entry' && $method === 'POST') respond(200, entry_start());
     elseif ($route === 'ad_start' && $method === 'POST') respond(200, ad_start());
     elseif ($route === 'revive_ad' && $method === 'POST') respond(200, revive_ad());
+    elseif ($route === 'profile' && $method === 'GET') respond(200, profile_get());
+    elseif ($route === 'profile' && $method === 'POST') respond(200, profile_put());
     else respond(404, ['error' => 'not_found']);
 } catch (HttpError $e) {
     respond($e->status, ['error' => $e->codeName]);

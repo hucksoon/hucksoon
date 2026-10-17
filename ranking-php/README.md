@@ -49,6 +49,8 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 | `POST api.php?r=entry` `{ adTicket? }` | 1층 문으로 새로 시작 (하루 무료 5회, 그 뒤엔 광고 티켓) |
 | `POST api.php?r=ad_start` `{ kind }` | 광고 보기 전에 티켓 받기 (entry / revive / fee) |
 | `POST api.php?r=revive_ad` `{ adTicket }` | 광고 보고 부활 |
+| `GET api.php?r=profile` | 내 계정 저장 (가방·진행 상황) (로그인) |
+| `POST api.php?r=profile` `{ rev, data }` | 계정 저장 올리기. 저장 번호가 다르면 서버 내용을 돌려줌 |
 
 ## 로비 (지금 접속 중인 사람)
 
@@ -96,6 +98,18 @@ location ~ ^/ranking/(config\.php|config\.sample\.php|README\.md|data/) { deny a
 - 기록: `daily_entries`(사람별 하루 무료 입장 수), `ad_tickets`(광고 티켓). 3일 지난 티켓은 지워요
 - 광고 종류는 게임의 `ads-config.js`. 지금은 테스트 광고(5초 안내 화면, 수익 없음). 구글 AdSense **H5 게임 광고(보상형)** 승인을 받으면 거기에 게시자 ID를 넣어요
 
+## 계정 저장 (가방·진행 상황)
+
+로그인한 사람의 **가방, 장착 장비, 강화석, 도감, 진행 중인 판(층·골드·레벨), 상점 상자 보관함**을 서버에 저장해요 (`profile.php`). 같은 계정이면 웹·앱·다른 기기에서 같은 데이터를 써요.
+
+- `GET ?r=profile` → `{ rev, data }` / `POST ?r=profile { rev, data }` → `{ ok, rev }`
+- `rev`(저장 번호)가 서버와 같을 때만 덮어써요. 다른 기기가 먼저 저장했으면 `{ ok: false, conflict: true, rev, data }`로 서버 내용을 돌려주고, 게임은 그걸로 바꿔요 (두 기기가 서로의 저장을 지우지 않게)
+- 게임은 바뀐 게 있으면 2초 모았다가 올리고, 탭을 닫거나 숨길 때 바로 올려요. 서버가 안 되면 15초마다 다시 시도해요
+- 처음 한 번은 그 브라우저에 있던 가방을 올려요. 예전 방식(Xsolla 계정 속성)에 저장된 진행 상황이 있으면 그걸 이어서 올려요
+- 게스트는 서버에 저장하지 않아요 (그 기기에만). 계정을 연결하면 게스트 장비가 계정으로 옮겨져요
+- 얻은·버린 기록(log)은 커서 브라우저에만 둬요. 아이템 위조는 지금처럼 랭킹·거래소에서 시드로 검증해요
+- 기록: `profiles` 표 (사람 키는 HMAC, 내용은 JSON). 한 사람당 200KB까지
+
 ## 운영자 선물 (테스터·이벤트 지급)
 
 서버에서 명령으로 특정 사용자의 우편함에 골드·캐시를 넣어요. 웹으로는 열리지 않아요.
@@ -128,7 +142,7 @@ sudo -u www-data php gift.php --resume <이메일>
 
 ```bash
 cd /tmp && rm -rf dungeon && git clone --depth 1 https://github.com/hucksoon/hucksoon.git dungeon
-sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /tmp/dungeon/ranking-php/market.php /tmp/dungeon/ranking-php/gift.php /tmp/dungeon/ranking-php/ads.php /var/www/html/ranking/
+sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /tmp/dungeon/ranking-php/market.php /tmp/dungeon/ranking-php/gift.php /tmp/dungeon/ranking-php/ads.php /tmp/dungeon/ranking-php/profile.php /var/www/html/ranking/
 ```
 
 DB 표는 다음 요청 때 새 칸이 자동으로 추가돼요.
