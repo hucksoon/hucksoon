@@ -22,31 +22,46 @@
 </main>
 <script>
 // 예전 주소(hucksoon.github.io/hucksoon/…)로 온 사람을 새 주소로 보냄. 404.html도 같은 내용 (상점·랭킹 등 옛 링크)
-// 브라우저 저장소는 주소마다 따로라서, 이 브라우저의 게스트 기록(가방·진행 상황)을 #import=…로 함께 넘김.
-// 로그인 정보는 넘기지 않음: 계정은 새 주소에서 다시 로그인하면 서버 저장본이 그대로 옴
+// 브라우저 저장소는 주소마다 따로라서, 이 브라우저의 기록을 #import=…로 함께 넘김:
+//   게스트로 하던 진행 상황·가방, 그리고 계정으로 하던 가방(서버 저장이 생기기 전엔 이 브라우저에만 있었음).
+// 로그인 정보는 넘기지 않음: 새 주소에서 다시 로그인하면 서버 저장본이 오고, 넘긴 가방은 그때 합쳐짐
 (function () {
   var NEW = "https://game.apacimtest.com/";
   var get = function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } };
   var page = location.pathname.replace(/^\/hucksoon\/?/, "");
   var url = NEW + (/^(shop|ranking|privacy)\.html$/.test(page) ? page : "") + location.search;
   var note = document.getElementById("note");
+  var loggedIn = !!get("rl_auth");
   var id = get("rl_device_id");
-  if (get("rl_auth")) {
-    note.textContent = "새 주소에서 같은 계정으로 다시 로그인하면 가방과 진행 상황이 그대로 이어져요. 잠시 뒤 자동으로 이동해요.";
-  } else if (id && (get("rl_save") || get("rl_inv:g:" + id)) && url === NEW) {
-    var d = { rl_device_id: id };
-    ["rl_save", "rl_level", "rl_inv:g:" + id, "rl_dex:g:" + id, "rl_mail:g:" + id].forEach(function (k) { var v = get(k); if (v) d[k] = v; });
-    // 아이템 기록(log)이 길면 최근 300개만 (주소 길이 제한)
+  // 아이템 기록(log)이 길면 최근 300개만 (주소 길이 제한)
+  var trim = function (text) {
     try {
-      var inv = JSON.parse(d["rl_inv:g:" + id]);
-      if (inv && Array.isArray(inv.log) && inv.log.length > 300) { inv.log = inv.log.slice(-300); d["rl_inv:g:" + id] = JSON.stringify(inv); }
+      var inv = JSON.parse(text);
+      if (inv && Array.isArray(inv.log) && inv.log.length > 300) { inv.log = inv.log.slice(-300); return JSON.stringify(inv); }
     } catch (e) {}
+    return text;
+  };
+  var d = {}, any = false;
+  if (id && !loggedIn && (get("rl_save") || get("rl_inv:g:" + id))) {
+    d.rl_device_id = id;
+    ["rl_save", "rl_level", "rl_inv:g:" + id, "rl_dex:g:" + id, "rl_mail:g:" + id].forEach(function (k) { var v = get(k); if (v) d[k] = k.indexOf("rl_inv:") === 0 ? trim(v) : v; });
+    any = true;
+  }
+  var keys = [];
+  try { for (var i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i)); } catch (e) {}
+  keys.forEach(function (k) {
+    if (!/^rl_(inv|dex|mail):u:[0-9a-zA-Z-]{1,64}$/.test(k)) return;
+    var v = get(k);
+    if (v) { d[k] = k.indexOf("rl_inv:") === 0 ? trim(v) : v; any = true; }
+  });
+  if (any && url === NEW) {
     var bytes = new TextEncoder().encode(JSON.stringify(d));
     var bin = "";
-    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    for (var j = 0; j < bytes.length; j++) bin += String.fromCharCode(bytes[j]);
     url = NEW + "#import=" + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    note.textContent = "이 브라우저에서 게스트로 하던 가방과 진행 상황을 새 주소로 함께 옮겨요. 잠시 뒤 자동으로 이동해요.";
   }
+  if (loggedIn) note.textContent = "새 주소에서 같은 계정으로 다시 로그인하면 가방과 진행 상황이 그대로 이어져요. 이 브라우저에 있던 장비도 함께 옮겨요. 잠시 뒤 자동으로 이동해요.";
+  else if (any) note.textContent = "이 브라우저에서 하던 가방과 진행 상황을 새 주소로 함께 옮겨요. 잠시 뒤 자동으로 이동해요.";
   document.getElementById("go").href = url;
   setTimeout(function () { location.replace(url); }, 2500);
 })();
