@@ -6,7 +6,7 @@ compatibility_date = "2025-09-01"
 
 [vars]
 LOGIN_PROJECT_ID = "30375188-893b-4b1a-ba1b-c8ba692fa5e3"
-ALLOWED_ORIGINS = "https://hucksoon.github.io"
+ALLOWED_ORIGINS = "https://game.apacimtest.com,https://hucksoon.github.io"
 
 # `npx wrangler d1 create dungeon-ranking` 이 알려주는 database_id 로 바꾸세요
 [[d1_databases]]

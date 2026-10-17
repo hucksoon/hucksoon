@@ -592,7 +592,7 @@
     loginProjectId: "30375188-893b-4b1a-ba1b-c8ba692fa5e3", // Login 프로젝트 UUID
     clientId: "18732",                                      // OAuth 2.0 public 클라이언트 ID (숫자)
     publisherProjectId: 317991,                             // 퍼블리셔 프로젝트 ID
-    // 로그인 뒤 돌아올 주소 = 게임이 열린 폴더 (예: https://hucksoon.github.io/hucksoon/). PA의 redirect URI 목록에 있어야 함
+    // 로그인 뒤 돌아올 주소 = 게임이 열린 폴더 (https://game.apacimtest.com/). PA의 redirect URI 목록에 있어야 함
     redirectUri: new URL("./", location.href).href,
   };
   const LOGIN_API = "https://login.xsolla.com/api";
@@ -607,6 +607,25 @@
   };
   const randomId = () => (crypto.randomUUID ? crypto.randomUUID()
     : Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join(""));
+
+  // ---- 예전 주소(hucksoon.github.io/hucksoon)에서 옮겨 오기 ----
+  // 예전 주소의 안내 페이지가 그 브라우저의 게스트 기록을 #import=…(base64url JSON)로 넘겨줌. 브라우저 저장소는 주소마다 따로라서.
+  // 이 브라우저에 새 주소 기록이 하나도 없을 때만 받음 (덮어쓰지 않게). 로그인 정보는 받지 않음 (다시 로그인하면 서버 저장본이 옴)
+  const imported = (() => {
+    const m = location.hash.match(/^#import=([\w-]+)$/);
+    if (!m) return null;
+    history.replaceState(null, "", location.pathname + location.search);
+    if (store.get("rl_device_id") || store.get("rl_save")) return "skipped";
+    try {
+      const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
+      const d = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0))));
+      const id = d.rl_device_id;
+      if (typeof id !== "string" || !/^[0-9a-zA-Z-]{8,64}$/.test(id)) return null;
+      const keys = ["rl_device_id", "rl_save", "rl_level", `rl_inv:g:${id}`, `rl_dex:g:${id}`, `rl_mail:g:${id}`];
+      for (const k of keys) if (typeof d[k] === "string") store.set(k, d[k]);
+      return "ok";
+    } catch { return null; }
+  })();
 
   // ---- 계정 (Xsolla Login, OAuth 2.0 + 이메일/휴대폰 인증 코드) ----
   const Account = (() => {
@@ -3522,6 +3541,8 @@
   requestAnimationFrame(lobbyLoop);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) Lobby.ping(); });
   renderAccount();
+  if (imported === "ok") log("예전 주소에서 하던 게스트 기록(가방·진행 상황)을 옮겨 왔다.", "good");
+  else if (imported === "skipped") log("이 브라우저에 이미 새 주소 기록이 있어서 예전 주소의 게스트 기록은 옮기지 않았다. 계정을 연결했다면 로그인하면 이어진다.", "info");
   // 로그인 중이면 서버 저장본과 맞춘 다음에 상자 보관함을 가방으로 (syncAfterLogin 안에서)
   if (Account.configured() && Account.loggedIn()) syncAfterLogin();
   else { collectMail(true); Ranking.schedule(); }

@@ -3,8 +3,8 @@
 Claude와 같이 라이브 코딩으로 만들고 있는 브라우저 로그라이크 게임의 개발 기록이에요.
 날짜와 시간은 한국 시간이고, 괄호 안 번호는 머지된 PR이에요.
 
-- 게임: https://hucksoon.github.io/hucksoon/
-- 랭킹: https://hucksoon.github.io/hucksoon/ranking.html
+- 게임: https://game.apacimtest.com/ (10/17까지는 https://hucksoon.github.io/hucksoon/)
+- 랭킹: https://game.apacimtest.com/ranking.html
 - 규칙 문서: [아이템](items.md) · [몬스터](monsters.md) · [경제](economy.md)
 
 ---
@@ -189,6 +189,12 @@ Claude와 같이 라이브 코딩으로 만들고 있는 브라우저 로그라�
 - 게스트는 그 기기에만 저장돼요. 화면 위에 "계정을 연결하면 가방과 진행 상황이 서버에 보존돼요" 안내를 띄워요
 - 도메인을 옮기면 브라우저 저장소가 따라가지 않아서, 옮기기 전에 이걸 먼저 했어요. 개인정보처리방침에도 반영했어요
 
+### 이어서 · 게임 전용 저장소와 새 주소
+- 게임을 GitHub 프로필 저장소(`hucksoon/hucksoon`)에서 **전용 저장소 `hucksoon/dungeon-crawler`** 로 옮겼어요. 지금까지의 기록(커밋)도 그대로 가져갔어요
+- 주소는 갖고 있던 도메인의 **`game.apacimtest.com`**. 나중에 웹과 앱을 같이 낼 때 쓰기 좋게 게임만의 주소를 만들었어요
+- 브라우저 저장소는 주소마다 따로라서, 예전 주소는 안내 페이지가 돼요. 게스트로 하던 가방·진행 상황은 새 주소로 함께 넘겨 주고, 계정은 다시 로그인하면 서버 저장본이 그대로 와요
+- 예전 상점·랭킹 링크도 새 주소의 같은 페이지로 보내요
+
 ---
 
 ## 남은 일
@@ -197,5 +203,4 @@ Claude와 같이 라이브 코딩으로 만들고 있는 브라우저 로그라�
 - 실제 카드로 결제 끝까지 확인하기 (캐시 지급, 취소)
 - 실제 캐시로 부활 확인하기
 - 로비: 2D 그래픽, 이름 겹침 정리, 오른쪽 "준비 중" 건물에 들어갈 기능 정하기
-- 게임 주소를 `game.apacimtest.com`(게임 전용 저장소)으로 옮기기: GitHub Pages 사용자 도메인, Xsolla 로그인 돌아올 주소, 서버 `allowed_origins`
 - 아이디어: 자동 테스트(CI), Xsolla 웹훅 서명 검증

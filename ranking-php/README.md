@@ -142,7 +142,7 @@ sudo -u www-data php gift.php --resume <이메일>
 서버에 이미 올려 둔 경우, 새 파일만 덮어써요 (`config.php`와 `data/`는 그대로).
 
 ```bash
-cd /tmp && rm -rf dungeon && git clone --depth 1 https://github.com/hucksoon/hucksoon.git dungeon
+cd /tmp && rm -rf dungeon && git clone --depth 1 https://github.com/hucksoon/dungeon-crawler.git dungeon
 sudo cp /tmp/dungeon/ranking-php/api.php /tmp/dungeon/ranking-php/rules.php /tmp/dungeon/ranking-php/market.php /tmp/dungeon/ranking-php/gift.php /tmp/dungeon/ranking-php/ads.php /tmp/dungeon/ranking-php/profile.php /var/www/html/ranking/
 ```
 

@@ -14,7 +14,7 @@ return [
     'login_project_id' => '30375188-893b-4b1a-ba1b-c8ba692fa5e3',
 
     // 게임 주소 (쉼표로 구분). 여기 있는 주소의 브라우저 요청만 허용
-    'allowed_origins' => 'https://hucksoon.github.io',
+    'allowed_origins' => 'https://game.apacimtest.com,https://hucksoon.github.io',
 
     // DB. 기본은 SQLite 파일 (웹에서 열 수 없는 폴더에 두세요). MySQL 예:
     //   'db_dsn' => 'mysql:host=localhost;dbname=dungeon;charset=utf8mb4', 'db_user' => '...', 'db_pass' => '...',
