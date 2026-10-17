@@ -1,4 +1,0 @@
-# 설정 파일과 데이터는 웹에서 열 수 없게 (Apache)
-<FilesMatch "^(config\.php|config\.sample\.php|README\.md)$">
-  Require all denied
-</FilesMatch>
