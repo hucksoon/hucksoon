@@ -194,6 +194,7 @@
     font-size: 13px;
   }
   #account-status { opacity: 0.8; }
+  #guest-note { flex-basis: 100%; text-align: center; font-size: 12px; color: var(--accent); opacity: 0.85; }
   button, a.btn {
     font: inherit;
     color: var(--text);
@@ -391,6 +392,7 @@
     <a id="shop-btn" class="btn" href="shop.html">상점</a>
     <a id="rank-btn" class="btn" href="ranking.html" target="_blank" rel="noopener">랭킹</a>
     <button id="portal-btn" class="keys-only dungeon-only" type="button">포탈 (P)</button>
+    <span id="guest-note" hidden>게스트는 이 기기에만 저장돼요. 계정을 연결하면 가방과 진행 상황이 서버에 보존돼요.</span>
   </div>
   <div id="stats">
     <span>층 <b id="depth">1</b> (최고 <span id="best">0</span>)</span>
@@ -747,7 +749,7 @@
   })();
 
   // ---- 인벤토리 / 장비 ----
-  // 계정(로그인) 또는 게스트(기기 ID)마다 따로 저장. 서버 저장이 생기기 전까지는 이 브라우저에만 있음.
+  // 계정(로그인) 또는 게스트(기기 ID)마다 따로 저장. 로그인하면 게임 서버에도 저장 (Profile), 게스트는 이 브라우저에만.
   // 장비는 죽어도 사라지지 않음. 얻거나 버린 기록은 전부 log에 남김 (시드로 서버에서 다시 계산해 검증 가능)
   const BAG_SIZE = 48;
   const Inv = (() => {
@@ -763,8 +765,24 @@
       } catch {}
       return empty();
     }
-    const write = () => store.set(key(owner), JSON.stringify(data));
+    const write = () => { store.set(key(owner), JSON.stringify(data)); Profile.touch("soon"); };
     const all = () => [...data.bag, ...Object.values(data.equip).filter(Boolean)];
+    const fullEquip = (eq) => Object.fromEntries(RLItems.SLOTS.map(s => [s, eq?.[s] || null]));
+
+    // 다른 곳(게스트, 이 기기에만 있던 예전 저장)의 장비를 지금 가방으로. 빈 칸이면 장착 상태도 유지
+    function absorb(src, from) {
+      let moved = 0;
+      const take = (item, wasEquipped) => {
+        if (all().some(x => x.id === item.id)) return;
+        if (wasEquipped && !data.equip[item.slot]) data.equip[item.slot] = item;
+        else data.bag.push(item);
+        record("migrate", item, { from });
+        moved++;
+      };
+      src.bag.forEach(item => take(item, false));
+      Object.values(src.equip || {}).filter(Boolean).forEach(item => take(item, true));
+      return moved;
+    }
 
     function record(ev, item, extra = {}) {
       data.log.push({
@@ -777,6 +795,20 @@
     return {
       use(o) { owner = o; data = read(o); },
       owner: () => owner,
+      // 서버에 올리는 부분 (얻은·버린 기록 log는 커서 이 기기에만)
+      snapshot: () => ({ bag: data.bag, equip: data.equip, stones: data.stones || 0 }),
+      // 서버 저장본으로 바꿈 (기록은 이 기기 것 유지)
+      load(o, inv) {
+        owner = o;
+        data = { bag: Array.isArray(inv?.bag) ? inv.bag : [], equip: fullEquip(inv?.equip), stones: inv?.stones || 0, log: read(o).log };
+        store.set(key(owner), JSON.stringify(data));
+      },
+      // 이 기기에만 있던 장비를 합침. 옮긴 개수
+      absorb(src, from) {
+        const moved = absorb(src, from);
+        if (moved) write();
+        return moved;
+      },
       items: () => all(),
       bag: () => data.bag,
       equipped: () => data.equip,
@@ -902,16 +934,7 @@
       mergeFrom(other) {
         if (other === owner) return 0;
         const src = read(other);
-        let moved = 0;
-        const take = (item, wasEquipped) => {
-          if (all().some(x => x.id === item.id)) return;
-          if (wasEquipped && !data.equip[item.slot]) data.equip[item.slot] = item;
-          else data.bag.push(item);
-          record("migrate", item, { from: other });
-          moved++;
-        };
-        src.bag.forEach(item => take(item, false));
-        Object.values(src.equip).filter(Boolean).forEach(item => take(item, true));
+        const moved = absorb(src, other);
         data.log.push(...src.log);
         write();
         store.del(key(other));
@@ -932,9 +955,25 @@
       } catch {}
       return { seen: {}, kills: {} };
     }
-    const write = () => store.set(key(owner), JSON.stringify(data));
+    const write = () => { store.set(key(owner), JSON.stringify(data)); Profile.touch(); };
+    const absorb = (src) => {
+      Object.assign(data.seen, src.seen);
+      for (const [id, n] of Object.entries(src.kills)) data.kills[id] = (data.kills[id] || 0) + n;
+    };
     return {
       use(o) { owner = o; data = read(o); },
+      snapshot: () => data,
+      load(o, dex) {
+        owner = o;
+        data = dex && dex.seen && dex.kills ? dex : { seen: {}, kills: {} };
+        store.set(key(owner), JSON.stringify(data));
+      },
+      // 이 기기에만 있던 도감을 합침: 본 몬스터는 합치고, 처치 수는 큰 쪽
+      absorb(src) {
+        Object.assign(data.seen, src.seen);
+        for (const [id, n] of Object.entries(src.kills)) data.kills[id] = Math.max(data.kills[id] || 0, n);
+        write();
+      },
       seen: (id) => !!data.seen[id],
       kills: (id) => data.kills[id] || 0,
       count: () => Object.keys(data.seen).length,
@@ -942,9 +981,7 @@
       kill(id) { data.seen[id] = true; data.kills[id] = (data.kills[id] || 0) + 1; write(); },
       mergeFrom(other) {
         if (other === owner) return;
-        const src = read(other);
-        Object.assign(data.seen, src.seen);
-        for (const [id, n] of Object.entries(src.kills)) data.kills[id] = (data.kills[id] || 0) + n;
+        absorb(read(other));
         write();
         store.del(key(other));
       },
@@ -1448,7 +1485,10 @@
     store.set(SAVE_KEY, JSON.stringify(makeSave()));
     saveLevel();
     Ranking.schedule();
-    if (!cloudReady) return;
+    // 층 이동·쓰러짐·포탈·골드 거래 같은 중요한 순간(flushNow)만 바로, 이동·전투는 1분에 한 번
+    Profile.touch(flushNow ? "soon" : "later");
+    // 아래는 게임 서버가 없을 때만: 진행 상황을 Xsolla 계정 속성에 저장
+    if (!cloudReady || RANKING_API) return;
     clearTimeout(cloudTimer);
     cloudTimer = setTimeout(flushCloud, flushNow ? 0 : 2000);
   }
@@ -1456,7 +1496,7 @@
   async function flushCloud(keepalive = false) {
     clearTimeout(cloudTimer);
     cloudTimer = null;
-    if (!cloudReady) return;
+    if (!cloudReady || RANKING_API) return;
     try {
       await Account.saveAttr(SAVE_ATTR, store.get(SAVE_KEY), keepalive);
     } catch (e) {
@@ -1513,8 +1553,24 @@
   }
 
   // 계정 저장본이 있으면 그걸로 이어하고, 없으면 지금(게스트) 진행 상황을 계정에 올림
-  async function syncAfterLogin() {
+  // guestOwner: 방금 로그인했으면 게스트로 모은 장비·도감을 계정으로 옮김 (계정 저장본을 불러온 다음에)
+  async function syncAfterLogin(guestOwner = null) {
     cloudReady = false;
+    if (RANKING_API) {
+      try {
+        await Profile.sync(guestOwner);
+        cloudReady = true;
+        collectMail(true);
+        Ranking.schedule();
+      } catch (e) {
+        log(`계정 저장 데이터를 불러오지 못했다: ${e.message} (잠시 뒤 다시 시도)`, "bad");
+        setTimeout(() => { if (Account.loggedIn() && !cloudReady) syncAfterLogin(guestOwner); }, 15000);
+      } finally {
+        renderAccount();
+      }
+      return;
+    }
+    if (guestOwner) mergeGuest(guestOwner);
     try {
       const cloud = parseSave(await Account.loadAttr(SAVE_ATTR));
       if (!Account.loggedIn()) return;
@@ -1535,6 +1591,167 @@
       renderAccount();
     }
   }
+
+  function mergeGuest(guestOwner) {
+    Dex.mergeFrom(guestOwner);
+    const moved = Inv.mergeFrom(guestOwner);
+    if (moved) log(`게스트 장비 ${moved}개를 계정으로 옮겼다.`, "good");
+  }
+
+  // ---- 계정 저장 (게임 서버) ---- 로그인하면 가방·장착 장비·강화석·도감·진행 중인 판·상자 보관함을 서버에 저장
+  // 같은 계정이면 웹·앱·다른 기기에서 같은 데이터.
+  // 서버 요청을 줄이려고: 아이템·재화·층 이동 같은 중요한 변경은 2초 모았다가, 이동·전투(HP 등)는 1분에 한 번,
+  // 탭을 닫거나 숨길 때·로그아웃할 때는 바로. 지난번에 올린 것과 같으면 보내지 않음.
+  // 서버는 저장 번호(rev)가 같을 때만 덮어씀 → 다른 기기가 먼저 저장했으면 그쪽(서버)이 기준
+  // 이 기기에는 마지막으로 맞춘 저장 번호와 아직 못 올린 변경이 있는지만 기록 (rl_profile:<소유자>)
+  const Profile = (() => {
+    let ready = false;    // 서버와 한 번 맞춘 뒤에만 올림
+    let quiet = false;    // 서버 저장본을 적용하는 동안은 변경으로 치지 않음
+    let changes = 0;
+    let timer = null, due = 0, pushing = null, warned = false;
+    let lastSent = null;  // 서버와 같은 내용 (JSON). 같으면 보내지 않음
+    const DELAY = { soon: 2000, later: 60000 };
+    const on = () => !!RANKING_API && Account.loggedIn();
+    const metaKey = () => `rl_profile:${Inv.owner()}`;
+    function meta() { try { return JSON.parse(store.get(metaKey())); } catch { return null; } }
+    const setMeta = (m) => store.set(metaKey(), JSON.stringify(m));
+    const mailKey = () => `rl_mail:${Inv.owner()}`;
+    function boxMail() { try { return JSON.parse(store.get(mailKey())) || []; } catch { return []; } }
+
+    const data = () => ({ v: 1, save: makeSave(), inv: Inv.snapshot(), dex: Dex.snapshot(), boxMail: boxMail() });
+
+    async function call(method, body, keepalive = false) {
+      const headers = await serverHeaders();
+      if (!headers?.Authorization) throw new Error("로그인이 필요해요.");
+      const res = await fetch(rankingUrl("profile"), { method, headers, body, keepalive });
+      let out = null;
+      try { out = await res.json(); } catch {}
+      if (!res.ok) throw new Error(out?.error ? `서버 오류 (${out.error})` : `서버 오류 (${res.status})`);
+      return out;
+    }
+
+    function quietly(fn) { quiet = true; try { return fn(); } finally { quiet = false; } }
+
+    // 서버 저장본을 이 기기에 적용. 상자 보관함은 합침 (상점에서 연 상자는 그 기기에 먼저 들어오므로)
+    function apply(d, rev) {
+      quietly(() => {
+        const o = Inv.owner();
+        Inv.load(o, d.inv);
+        Dex.load(o, d.dex);
+        const mine = boxMail();
+        const box = [...mine, ...(Array.isArray(d.boxMail) ? d.boxMail : []).filter(m => !mine.some(x => x.item?.id === m.item?.id))];
+        if (box.length) store.set(mailKey(), JSON.stringify(box)); else store.del(mailKey());
+        const save = d.save?.v === 1 ? d.save : null;
+        if (save) store.set(SAVE_KEY, JSON.stringify(save)); else store.del(SAVE_KEY);
+        startFromSave(save);
+      });
+      setMeta({ rev, dirty: false });
+    }
+
+    // 로그인 직후·접속할 때 서버와 맞춤
+    async function sync(guestOwner = null) {
+      ready = false;
+      const owner = Inv.owner();
+      const m = meta();
+      const srv = await call("GET");
+      if (!Account.loggedIn() || Inv.owner() !== owner) return;
+      if (srv.data) {
+        if (!m || m.rev !== srv.rev || guestOwner) {
+          // 다른 기기에서 저장한 게 더 새로움, 이 기기는 처음, 또는 방금 로그인함(게스트 판 대신 계정 판) → 서버 기준
+          const local = { inv: Inv.snapshot(), dex: Dex.snapshot() };
+          apply(srv.data, srv.rev);
+          log("계정에 저장된 진행 상황을 불러왔다.", "good");
+          // 이 기기에서 처음 맞추면, 예전에 이 기기에만 저장돼 있던 장비·도감을 합침
+          if (!m) {
+            const moved = Inv.absorb(local.inv, "device");
+            Dex.absorb(local.dex);
+            if (moved) log(`이 기기에 있던 장비 ${moved}개를 계정에 합쳤다.`, "good");
+          }
+        }
+        // 저장 번호가 같으면 이 기기가 최신: 못 올린 변경만 올림
+      } else {
+        // 서버에 아직 없음: 예전 방식(Xsolla 계정 속성)으로 저장한 진행 상황이 있으면 그걸로 이어서 올림
+        let old = null;
+        try { old = parseSave(await Account.loadAttr(SAVE_ATTR)); } catch {}
+        if (old) { store.set(SAVE_KEY, JSON.stringify(old)); quietly(() => startFromSave(old)); }
+        setMeta({ rev: 0, dirty: true });
+        log("지금 진행 상황과 가방을 계정에 저장한다.", "good");
+      }
+      lastSent = srv.data ? JSON.stringify(srv.data) : null;
+      // 게스트로 모은 장비·도감을 계정으로 (방금 로그인했거나, 지난번 로그인 때 서버가 안 돼서 못 옮긴 것)
+      const guest = guestOwner || inventoryOwner(false);
+      if (store.get(`rl_inv:${guest}`) || store.get(`rl_dex:${guest}`)) mergeGuest(guest);
+      ready = true;
+      warned = false;
+      await push();
+    }
+
+    // 바뀐 게 있음: 저장 표시만 하고 나중에 올림. level: "soon"(2초) | "later"(1분)
+    function touch(level = "later") {
+      if (quiet || !on()) return;
+      changes++;
+      const m = meta() || { rev: 0 };
+      if (!m.dirty) setMeta({ ...m, dirty: true });
+      if (ready) schedule(DELAY[level]);
+    }
+    // 이미 더 이른 저장이 잡혀 있으면 그대로
+    function schedule(ms) {
+      const at = Date.now() + ms;
+      if (timer && due <= at) return;
+      clearTimeout(timer);
+      due = at;
+      timer = setTimeout(() => push(), ms);
+    }
+
+    // 못 올린 변경을 지금 올림. keepalive: 탭을 닫거나 숨길 때
+    async function push(keepalive = false) {
+      clearTimeout(timer);
+      timer = null;
+      while (pushing) await pushing;  // 올리는 중이면 끝난 뒤 남은 변경을 이어서
+      const m = meta();
+      if (!ready || !on() || !m?.dirty) return;
+      const owner = Inv.owner();
+      const sent = changes;
+      const json = JSON.stringify(data());
+      // HP처럼 바뀌었다가 그대로 돌아온 경우 등: 서버와 같으면 보내지 않음
+      if (json === lastSent) { setMeta({ ...m, dirty: false }); return; }
+      const body = `{"rev":${m.rev},"data":${json}}`;
+      pushing = (async () => {
+        try {
+          // keepalive는 64KB까지만 됨
+          const res = await call("POST", body, keepalive && body.length < 60000);
+          if (Inv.owner() !== owner || !Account.loggedIn()) return;
+          warned = false;
+          if (res.ok) { setMeta({ rev: res.rev, dirty: changes !== sent }); lastSent = json; }
+          else if (res.conflict && res.data) {
+            apply(res.data, res.rev);
+            lastSent = JSON.stringify(res.data);
+            log("다른 기기에서 저장한 진행 상황으로 바꿨다.", "info");
+            if (scene === "lobby") renderLobby();
+          } else if (res.conflict) setMeta({ rev: res.rev, dirty: true });
+        } catch (e) {
+          if (!warned) log(`계정에 저장하지 못했다: ${e.message} (잠시 뒤 다시 시도)`, "bad");
+          warned = true;
+          schedule(15000);
+          return;
+        } finally {
+          pushing = null;
+        }
+        if (meta()?.dirty) schedule(DELAY.later);
+      })();
+      return pushing;
+    }
+
+    // 로그아웃: 남은 변경을 올리고 멈춤
+    async function stop() {
+      await push();
+      clearTimeout(timer);
+      timer = null;
+      ready = false;
+    }
+
+    return { sync, touch, push, stop, ready: () => ready };
+  })();
 
   // ---- 적 턴 ----
   let turn = 0;
@@ -2050,6 +2267,8 @@
 
   function renderAccount() {
     const guest = `게스트 #${Account.deviceId().slice(0, 6)} 로 플레이 중`;
+    // 서버 저장은 로그인한 사람만: 게스트에게 계정 연결 안내
+    document.getElementById("guest-note").hidden = !(RANKING_API && Account.configured() && !Account.loggedIn());
     if (!Account.configured()) {
       accountStatus.textContent = guest;
       accountBtn.textContent = "계정 연결";
@@ -2145,12 +2364,9 @@
         const guestOwner = inventoryOwner(false);
         Inv.use(inventoryOwner());
         Dex.use(inventoryOwner());
-        Dex.mergeFrom(guestOwner);
-        const moved = Inv.mergeFrom(guestOwner);
-        if (moved) log(`게스트 장비 ${moved}개를 계정으로 옮겼다.`, "good");
-        await syncAfterLogin();
+        await syncAfterLogin(guestOwner);
         // 상점에서 "계정 연결하기"로 왔으면 저장을 마치고 상점으로 돌아감
-        if (loginReturn) { await flushCloud(); location.href = loginReturn; }
+        if (loginReturn) { await flushCloud(); await Profile.push(); location.href = loginReturn; }
         // 쓰러진 창에서 계정을 연결했으면 다시 열어서 부활할 수 있게
         else if (gameOver && deathModal.hidden) openDeath();
       } catch (err) {
@@ -2170,6 +2386,7 @@
     accountBtn.blur();  // 이후 Space(대기) 키가 버튼을 다시 누르지 않게
     if (!Account.loggedIn()) { openLogin(); return; }
     if (cloudTimer) await flushCloud();
+    await Profile.stop();
     Account.logout();
     cloudReady = false;
     store.del(SAVE_KEY);
@@ -2183,7 +2400,9 @@
 
   // 탭을 닫거나 숨길 때 남은 저장을 바로 보냄
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden" && cloudTimer) flushCloud(true);
+    if (document.visibilityState !== "hidden") return;
+    if (cloudTimer) flushCloud(true);
+    Profile.push(true);
   });
 
   // ---- 인벤토리 UI ----
@@ -3303,9 +3522,9 @@
   requestAnimationFrame(lobbyLoop);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) Lobby.ping(); });
   renderAccount();
-  collectMail(true);
+  // 로그인 중이면 서버 저장본과 맞춘 다음에 상자 보관함을 가방으로 (syncAfterLogin 안에서)
   if (Account.configured() && Account.loggedIn()) syncAfterLogin();
-  else Ranking.schedule();
+  else { collectMail(true); Ranking.schedule(); }
   // 상점의 "계정 연결하기": 이미 로그인했으면 바로 상점으로, 아니면 로그인 창
   if (new URLSearchParams(location.search).get("login") === "shop") {
     history.replaceState(null, "", location.pathname);
