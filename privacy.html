@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>던전 크롤러 — 개인정보처리방침</title>
+<style>
+  :root { --bg: #0d0e14; --panel: #16181f; --border: #2a2d3a; --text: #cdd3de; --accent: #ffcf5c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: "Courier New", ui-monospace, monospace; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; line-height: 1.7; font-size: 14px; }
+  h1 { font-size: 20px; color: var(--accent); margin: 8px 0 4px; }
+  h2 { font-size: 16px; color: var(--accent); margin: 28px 0 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .meta { opacity: 0.6; font-size: 12px; margin: 0 0 16px; }
+  .summary { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+  th, td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--panel); }
+  a { color: #6bd3ff; }
+  ul { padding-left: 20px; }
+  .back { display: inline-block; margin-bottom: 8px; }
+  td:first-child { white-space: nowrap; }
+  @media (max-width: 560px) { table { font-size: 12px; } th, td { padding: 5px; } }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="./">← 게임으로</a>
+  <h1>개인정보처리방침</h1>
+  <p class="meta">던전 크롤러 · 시행일 2026년 10월 17일</p>
+
+  <div class="summary">
+    <b>한눈에 보기</b>
+    <ul>
+      <li>이메일·휴대폰 번호 <b>원본은 저장하지 않아요.</b> 화면에는 가린 형태(예: <code>ab***@example.com</code>)만 보여요.</li>
+      <li>로그인과 결제는 <b>Xsolla</b>가 처리해요. 카드 정보는 저희에게 오지 않아요.</li>
+      <li>광고를 붙이면 <b>Google</b>이 광고를 보여 주려고 쿠키 등을 쓸 수 있어요.</li>
+      <li>기록 삭제 등은 아래 <a href="#contact">문의처</a>로 요청할 수 있어요.</li>
+    </ul>
+  </div>
+
+  <h2>1. 처리하는 정보와 목적</h2>
+  <table>
+    <tr><th>구분</th><th>정보</th><th>목적</th></tr>
+    <tr><td>게스트</td><td>이 브라우저에서 만든 무작위 기기 ID. 서버에는 이 값을 바로 저장하지 않고 <b>HMAC(되돌릴 수 없게 바꾼 값)</b>으로만 저장해요</td><td>게스트 구분, 랭킹·로비 표시(<code>게스트 #xxxxxx</code>)</td></tr>
+    <tr><td>계정 연결</td><td>이메일 또는 휴대폰 번호 (Xsolla Login이 인증). 저희 서버에는 <b>가린 이메일·번호</b>와 이메일의 HMAC 값만 저장해요</td><td>로그인, 기기 간 진행 이어하기, 랭킹 이름 표시, 운영자 선물 지급 대상 확인</td></tr>
+    <tr><td>게임 기록</td><td>최고 층, 그때의 장비와 능력치, 가진 아이템 중 최고 아이템</td><td>랭킹, 장비 보기, 아이템 위조 검증</td></tr>
+    <tr><td>로비 접속</td><td>로비 위치, 탐험 중인 층, 포탈 층</td><td>같이 접속한 사람 보기 (소식이 끊기고 1분 뒤 삭제)</td></tr>
+    <tr><td>거래소·우편함</td><td>올린 아이템, 판매자·구매자(내부 키와 가린 이름), 가격, 수수료와 낸 방법, 올린·팔린·끝난 시간, 우편(대금·아이템)</td><td>거래 처리, 분쟁 확인, 아이템 복사 방지</td></tr>
+    <tr><td>하루 입장·광고 보상</td><td>날짜별 무료 입장 횟수, 광고 보상 티켓(시작·사용 시각)</td><td>하루 횟수 제한, 광고 보상 처리 (티켓은 3일 뒤 삭제)</td></tr>
+    <tr><td>결제</td><td>주문 번호, 산 상품. 카드·계좌 정보는 Xsolla가 처리</td><td>캐시·아이템 지급, 결제 확인</td></tr>
+  </table>
+  <p>로그인 토큰은 서버에 저장하지 않아요. 로그인 확인과 캐시 지급·차감을 하는 동안에만 쓰고, 사용자 ID도 그때만 읽어요.</p>
+
+  <h2>2. 브라우저에 저장하는 정보</h2>
+  <p>게임 진행(층, 골드, 레벨), 가방과 장착 장비, 도감, 로그인 토큰, 기기 ID를 이 브라우저의 저장소(localStorage)에 저장해요. 브라우저 데이터를 지우면 함께 지워져요. 계정을 연결하면 게임 진행은 Xsolla 계정의 사용자 속성에도 저장돼서 다른 기기에서 이어서 할 수 있어요.</p>
+
+  <h2>3. 보관 기간</h2>
+  <ul>
+    <li>로비 접속 정보: 소식이 끊기고 1분 뒤 삭제</li>
+    <li>광고 보상 티켓: 3일 뒤 삭제</li>
+    <li>랭킹·거래·우편 기록: 서비스를 운영하는 동안 보관하고, 삭제를 요청하면 지체 없이 삭제해요 (다른 이용자와의 거래 기록은 분쟁 확인을 위해 거래 상대방 정보 없이 남길 수 있어요)</li>
+  </ul>
+
+  <h2>4. 처리를 맡기는 곳(위탁)과 제3자</h2>
+  <table>
+    <tr><th>곳</th><th>하는 일</th></tr>
+    <tr><td>Xsolla</td><td>로그인(이메일·문자 인증), 결제, 캐시(게임 화폐)와 아이템 관리, 계정 저장</td></tr>
+    <tr><td>GitHub (Pages)</td><td>게임 화면 제공</td></tr>
+    <tr><td>게임 서버 (운영자가 직접 관리)</td><td>랭킹, 로비, 거래소·우편함, 하루 입장·광고 보상 기록</td></tr>
+    <tr><td>Google (광고를 붙인 뒤)</td><td>광고 제공과 측정</td></tr>
+  </table>
+  <p>법에 따른 요청이 아니면 위 목적 밖으로 개인정보를 제3자에게 주지 않아요.</p>
+
+  <h2>5. 광고와 쿠키</h2>
+  <p>게임에 Google 광고(Google AdSense)를 붙이면, Google과 광고 파트너가 쿠키나 광고 식별자를 써서 이 사이트와 다른 사이트 방문 기록을 바탕으로 광고를 보여 주고 성과를 측정할 수 있어요.</p>
+  <ul>
+    <li>Google이 광고에서 정보를 쓰는 방법: <a href="https://policies.google.com/technologies/partner-sites" rel="noopener" target="_blank">policies.google.com/technologies/partner-sites</a></li>
+    <li>맞춤 광고 끄기: <a href="https://adssettings.google.com" rel="noopener" target="_blank">adssettings.google.com</a> (또는 <a href="https://www.aboutads.info" rel="noopener" target="_blank">aboutads.info</a>)</li>
+    <li>유럽 경제 지역·영국·스위스에서 접속하면, 맞춤 광고 전에 동의를 묻는 창이 떠요.</li>
+  </ul>
+  <p>광고를 보고 받는 보상(입장, 부활, 거래 수수료 면제)은 게임 안에서만 쓸 수 있어요. 광고를 눌러 달라고 요청하지 않아요.</p>
+
+  <h2>6. 이용자의 권리</h2>
+  <p>내 정보의 열람, 정정, 삭제, 처리 정지를 요청할 수 있어요. 아래 문의처로 요청하면 본인 확인 뒤 처리해요. 서버에는 원본 이메일이 없어서, 본인 확인을 위해 로그인한 상태에서 요청하거나 같은 이메일을 알려 주셔야 해요.</p>
+
+  <h2>7. 만 14세 미만 아동</h2>
+  <p>만 14세 미만 아동은 법정대리인의 동의가 있어야 계정을 연결하고 결제할 수 있어요. 동의 없이 수집된 사실을 알게 되면 지체 없이 삭제해요.</p>
+
+  <h2>8. 안전성 확보</h2>
+  <ul>
+    <li>이메일·기기 ID는 원본 대신 HMAC 값과 가린 형태로만 저장하고, HMAC 키는 서버 설정에 따로 보관해요</li>
+    <li>서버 설정 파일과 데이터베이스는 웹에서 열 수 없게 막아요</li>
+    <li>모든 통신은 HTTPS로 암호화해요</li>
+  </ul>
+
+  <h2 id="contact">9. 문의처</h2>
+  <p>개인정보 관련 문의와 요청: <a href="https://github.com/hucksoon/hucksoon/issues" rel="noopener" target="_blank">github.com/hucksoon/hucksoon/issues</a><br>
+  (공개 게시판이라 개인정보는 적지 말고, 연락받을 방법만 남겨 주세요.)</p>
+
+  <h2>10. 바뀌면</h2>
+  <p>이 방침이 바뀌면 시행 7일 전에 이 페이지에 알려요. 중요한 변경은 게임 화면에도 알려요.</p>
+</main>
+</body>
+</html>

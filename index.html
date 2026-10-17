@@ -334,6 +334,20 @@
   .shop-card.sold { opacity: 0.45; }
   #shop-reroll { width: 100%; margin-top: 10px; }
 
+  /* ---- 광고 ---- */
+  .modal.ad { display: flex; flex-direction: column; gap: 8px; text-align: center; }
+  .modal.ad button { width: 100%; padding: 10px; }
+  #ad-box { position: relative; padding: 26px 12px 18px; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg); font-size: 12px; line-height: 1.6; opacity: 0.9; }
+  #ad-box .ad-tag { position: absolute; top: 6px; left: 8px; font-size: 10px; opacity: 0.6; }
+  #ad-box .ad-art { font-size: 34px; color: var(--accent); }
+  #ad-modal { z-index: 10; }  /* 거래소·쓰러진 창 위에 */
+  #ad-count { margin: 0; font-size: 13px; color: var(--accent); min-height: 18px; }
+  #entry-info { font-size: 12px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  #entry-info b { color: var(--accent); }
+  #entry-info .ad { color: #be8cff; }
+  #death-revive .ad-revive { margin-top: 6px; }
+  .shop-card button.ad-buy { margin-top: 2px; font-size: 12px; }
+
   /* ---- 거래소 / 우편함 ---- */
   .modal.market { width: 760px; max-height: calc(100vh - 32px); overflow-y: auto; }
   #market-wallet { font-size: 12px; color: var(--accent); text-align: right; }
@@ -405,6 +419,7 @@
     </div>
   </div>
   <div id="lobby-panel" class="lobby-only">
+    <div id="entry-info"></div>
     <div class="lobby-head"><b>같이 접속한 사람들</b><span id="lobby-count"></span></div>
     <ul id="lobby-list"></ul>
   </div>
@@ -415,7 +430,8 @@
   던전에서 <b>포탈</b>을 타면 골드·레벨·장비를 그대로 들고 로비로 돌아와요. 쓰러지면 골드와 레벨은 처음부터예요.<br>
   로비 왼쪽 <b>거래소($)</b>로 걸어 들어가면 아이템을 사고팔고, 그 옆 빨간 <b>우편함(✉)</b>에서 판매 대금과 돌아온 아이템을 받아요.<br>
   계단(&gt;)을 밟으면 다음 층으로 내려갑니다. 적에게 부딪히면 공격합니다. 쓰러진 적이 장비(<b>)</b> 무기, <b>[</b> 방어구)를 떨어뜨리기도 해요.<br>
-  금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고, 그 바로 전 층(4, 9, 14…층) 계단 옆 상점(<b>&amp;</b>)에서 골드로 장비를 살 수 있어요. 금빛 칸의 황금 고블린을 놓치지 마세요!</p>
+  금색 테두리는 정예, 빨간 테두리는 보스예요. 5층마다 보스가 계단을 지키고, 그 바로 전 층(4, 9, 14…층) 계단 옆 상점(<b>&amp;</b>)에서 골드로 장비를 살 수 있어요. 금빛 칸의 황금 고블린을 놓치지 마세요!<br>
+  <a href="privacy.html" style="color: inherit">개인정보처리방침</a></p>
 </div>
 
 <div id="inv-modal" class="overlay" hidden>
@@ -456,6 +472,21 @@
     <div id="death-revive"></div>
     <p id="death-msg"></p>
     <button id="death-restart" type="button">로비에서 새로 시작 (R)</button>
+  </div>
+</div>
+
+<div id="ad-modal" class="overlay" hidden>
+  <div class="modal ad" role="dialog" aria-labelledby="ad-title">
+    <h2 id="ad-title">광고</h2>
+    <p class="sub" id="ad-sub"></p>
+    <div id="ad-box">
+      <div class="ad-tag">테스트 광고</div>
+      <div class="ad-art">⚔</div>
+      <p>실제 광고가 들어갈 자리예요.<br>구글 광고 승인을 받으면 진짜 광고가 떠요.</p>
+    </div>
+    <p id="ad-count"></p>
+    <button id="ad-claim" type="button" class="primary" disabled>보상 받기</button>
+    <button id="ad-close" type="button">닫기 (보상 없음)</button>
   </div>
 </div>
 
@@ -517,6 +548,7 @@
 <script src="items.js"></script>
 <script src="monsters.js"></script>
 <script src="ranking-config.js"></script>
+<script src="ads-config.js"></script>
 <script>
 (() => {
   "use strict";
@@ -558,7 +590,8 @@
     loginProjectId: "30375188-893b-4b1a-ba1b-c8ba692fa5e3", // Login 프로젝트 UUID
     clientId: "18732",                                      // OAuth 2.0 public 클라이언트 ID (숫자)
     publisherProjectId: 317991,                             // 퍼블리셔 프로젝트 ID
-    redirectUri: "https://hucksoon.github.io/hucksoon/",    // PA의 redirect URI와 정확히 같아야 함
+    // 로그인 뒤 돌아올 주소 = 게임이 열린 폴더 (예: https://hucksoon.github.io/hucksoon/). PA의 redirect URI 목록에 있어야 함
+    redirectUri: new URL("./", location.href).href,
   };
   const LOGIN_API = "https://login.xsolla.com/api";
   const SAVE_KEY = "rl_save";          // 로컬 저장 키
@@ -1657,17 +1690,24 @@
     }[from];
     log(msg[0], msg[1]);
     render();
+    Ads.loadStatus();
   }
 
   // which: "start" = 1층부터 (같은 캐릭터, 새 지도) / "resume" = 포탈을 탄 층으로 (떠난 그대로)
-  function enterDungeon(which) {
+  let entering = false;  // 입장 확인(서버·광고) 중에는 문을 다시 밟아도 무시
+  async function enterDungeon(which) {
     if (gameOver) { openDeath(); return; }  // 쓰러진 판: 부활하거나 로비에서 새로 시작
+    if (entering) return;
     if (which === "resume") {
       if (!resumeFloor()) { log("포탈을 타고 돌아온 층이 없다. 왼쪽 문으로 1층부터 들어가자.", "bad"); return; }
       setScene("dungeon");
       log(`포탈 문으로 ${depth}층에 다시 들어갔다.`, "info");
     } else {
       if (resumeFloor() && !confirm(`1층부터 들어갈까요?\n지금 기억된 포탈 층(${depth}층)은 사라져요. 골드·레벨·장비는 그대로예요.`)) return;
+      entering = true;
+      let ok = false;
+      try { ok = await allowEntry(); } finally { entering = false; }
+      if (!ok || scene !== "lobby") return;
       depth = 1;
       player.rid = newRunId();  // 새 지도 (아이템 시드가 겹치지 않게 판 ID도 새로)
       shopBought = [];
@@ -2549,6 +2589,11 @@
     market_not_configured: "거래소 서버 설정이 아직 끝나지 않았어요.",
     unauthorized: "로그인이 만료됐어요. 계정을 다시 연결해 주세요.",
     token_expired: "로그인이 만료됐어요. 계정을 다시 연결해 주세요.",
+    need_ad: "오늘 무료 입장을 모두 썼어요. 광고를 보면 더 들어갈 수 있어요.",
+    ad_limit: "오늘은 이 광고 보상을 다 받았어요. 내일 다시 받을 수 있어요.",
+    bad_ticket: "광고 확인에 실패했어요. 다시 시도해 주세요.",
+    ad_too_short: "광고를 끝까지 봐 주세요.",
+    too_many_tickets: "잠시 뒤 다시 시도해 주세요.",
   };
   const Market = {
     tab: "buy", list: null, mine: null, cash: null, sel: null, busy: false, mailCount: 0, mailKnown: false,
@@ -2626,7 +2671,7 @@
   async function refreshMarket() {
     const tab = Market.tab;
     const jobs = [loadCash()];
-    if (tab === "buy") jobs.push(marketCall("market", { params: Market.filter }).then(d => { Market.list = d; keepRules(d); }));
+    if (tab === "buy") jobs.push(marketCall("market", { params: Market.filter }).then(d => { Market.list = d; keepRules(d); }), Ads.loadStatus());
     else jobs.push(loadMine().then(() => { if (Market.mine) keepRules(Market.mine); }));
     try { await Promise.all(jobs); } catch (e) { setMarketMsg(e.message, "bad"); }
     if (!marketModal.hidden && Market.tab === tab) renderMarket();
@@ -2662,6 +2707,7 @@
       el("button", { type: "button", onclick: () => refreshMarket() }, "새로고침"));
     const note = el("p", { className: "market-note" },
       `모든 거래에 수수료 ◆${Market.rules.fee}이 붙어요 (사는 사람이 가격에 더해 내요). 골드는 지금 판의 골드로 내요.`,
+      Ads.status() ? ` 광고를 보면 수수료가 면제돼요 (오늘 ${Ads.status().ads.fee}/${Ads.status().adCaps.fee}회 남음).` : "",
       Account.loggedIn() ? "" : " 사려면 계정을 연결해야 해요.");
     const d = Market.list;
     if (!d) return [filters, note, marketEmpty("불러오는 중…")];
@@ -2686,23 +2732,36 @@
       ...(item ? statLines(item, "span") : []),
       el("span", { className: "who" }, `판매자 ${r.seller} · ${leftText(r.expiresAt - now)}`),
       el("span", { className: "price" }, priceText(r.gold, r.cash), el("span", { className: "meta" }, ` + 수수료 ◆${r.fee}`)),
-      el("button", { type: "button", className: r.mine ? "" : "primary", disabled, onclick: () => buyListing(r, name) }, label));
+      el("button", { type: "button", className: r.mine ? "" : "primary", disabled, onclick: () => buyListing(r, name) }, label),
+      adBuyButton(r, name));
   }
 
-  async function buyListing(r, name) {
+  // 광고 보고 수수료 없이 사기 (하루 상한). 캐시 가격이 0이면 캐시 없이도 살 수 있음
+  function adBuyButton(r, name) {
+    const left = Ads.status()?.ads?.fee ?? 0;
+    if (r.mine || !Account.loggedIn() || left <= 0) return null;
+    const short = r.gold > player.gold || (Market.cash != null && Market.cash < r.cash);
+    return el("button", { type: "button", className: "ad-buy", disabled: Market.busy || short, onclick: () => buyListing(r, name, true) },
+      `광고 보고 수수료 면제 · ${r.cash ? `◆${r.cash}` : "캐시 0"}${r.gold ? ` + ${r.gold.toLocaleString()} 골드` : ""}`);
+  }
+
+  async function buyListing(r, name, byAd = false) {
     if (!Account.loggedIn()) { closeMarket(); openLogin(); return; }
     if (Market.busy) return;
     if (r.gold && gameOver) { setMarketMsg("쓰러진 판의 골드는 쓸 수 없어요. 새로 시작하거나 부활한 뒤 사 주세요.", "bad"); return; }
-    const total = r.cash + r.fee;
-    const lines = [`${name}을(를) 살까요?`, "", r.gold ? `골드 ${r.gold.toLocaleString()}` : null, `캐시 ◆${r.cash} + 수수료 ◆${r.fee} = ◆${total}`];
+    const total = byAd ? r.cash : r.cash + r.fee;
+    const lines = [byAd ? `광고를 보고 ${name}을(를) 수수료 없이 살까요?` : `${name}을(를) 살까요?`, "", r.gold ? `골드 ${r.gold.toLocaleString()}` : null,
+      byAd ? `캐시 ◆${r.cash} (수수료 면제)` : `캐시 ◆${r.cash} + 수수료 ◆${r.fee} = ◆${total}`];
     if (!confirm(lines.filter(x => x !== null).join("\n"))) return;
     Market.busy = true;
-    setMarketMsg("구매하는 중…");
+    setMarketMsg(byAd ? "광고를 불러오는 중…" : "구매하는 중…");
     renderMarket();
     try {
-      const res = await marketCall("market_buy", { body: { id: r.id } });
+      const adTicket = byAd ? await Ads.watch("fee", "거래 수수료 면제") : undefined;
+      if (byAd) setMarketMsg("구매하는 중…");
+      const res = await marketCall("market_buy", { body: { id: r.id, adTicket } });
       if (r.gold) { player.gold = Math.max(0, player.gold - r.gold); updateStats(); saveGame(true); }
-      log(`거래소에서 ${name}을(를) 샀다. (${priceText(r.gold, total)}, 수수료 포함)`, "good");
+      log(`거래소에서 ${name}을(를) 샀다. (${priceText(r.gold, res.cash ?? total)}${byAd ? ", 광고로 수수료 면제" : ", 수수료 포함"})`, "good");
       // 산 아이템은 우편함으로 옴 → 가방에 자리가 있으면 바로 받음
       let got = false;
       try { await loadMine(); got = await claimMail(res.mail, { quiet: true }); } catch {}
@@ -2787,7 +2846,7 @@
       const when = dateText(h.endedAt);
       if (h.state === "sold") return h.role === "seller"
         ? `판매 완료 · ${priceText(h.gold, h.cash)} · 구매자 ${h.buyer} · ${when}`
-        : `구매 · ${priceText(h.gold, h.cash + h.fee)} (수수료 포함) · 판매자 ${h.seller} · ${when}`;
+        : `구매 · ${priceText(h.gold, h.cash + (h.feeBy === "ad" ? 0 : h.fee))} (${h.feeBy === "ad" ? "광고로 수수료 면제" : "수수료 포함"}) · 판매자 ${h.seller} · ${when}`;
       return h.state === "expired" ? `${Market.rules.hours}시간이 지나 우편함으로 · ${when}` : `내림 · ${when}`;
     };
     return [
@@ -2889,9 +2948,124 @@
   document.getElementById("market-close").addEventListener("click", closeMarket);
   marketModal.addEventListener("click", (e) => { if (e.target === marketModal) closeMarket(); });
 
+  // ---- 광고 보상 / 하루 입장 ----
+  // 1층 문으로 새로 시작할 때만 하루 입장 횟수를 셈 (무료 5회, 그 뒤엔 광고를 보고 입장)
+  // 부활·거래 수수료도 광고로 대신할 수 있음 (하루 상한: 부활 1회, 수수료 3회). 캐시로 하는 방법은 그대로
+  // 횟수와 상한은 서버(ads.php)가 셈. 광고를 시작할 때 서버에서 티켓을 받고, 끝까지 본 뒤 그 티켓으로 보상을 받음
+  // 광고 종류는 ads-config.js (지금은 테스트 광고: 5초 안내 화면)
+  const Ads = (() => {
+    const cfg = window.ADS || { provider: "test" };
+    const modalEl = document.getElementById("ad-modal");
+    let status = null;  // 오늘 상태 { free, used, left, unlimited, ads: { entry, revive, fee } }
+    let h5 = null;
+
+    async function loadStatus() {
+      if (!RANKING_API) { status = null; renderEntryInfo(); return null; }
+      try { status = await marketCall("entry_status"); } catch { status = null; }
+      renderEntryInfo();
+      return status;
+    }
+    function setStatus(s) { if (s && s.free != null) { status = s; renderEntryInfo(); } }
+
+    function renderEntryInfo() {
+      const info = document.getElementById("entry-info");
+      info.hidden = !status;
+      if (!status) return;
+      info.replaceChildren(status.unlimited ? "오늘 1층 입장: 개발자 계정이라 제한 없음"
+        : el("span", {}, "오늘 1층 무료 입장 ", el("b", {}, `${status.left}/${status.free}`), "회 남음",
+          status.left ? "" : el("span", { className: "ad" }, " · 광고를 보면 더 들어갈 수 있어요")));
+    }
+
+    // 구글 H5 게임 광고 (ads-config.js에서 provider: "h5"일 때)
+    function loadH5() {
+      if (h5) return h5;
+      h5 = new Promise((resolve) => {
+        window.adsbygoogle = window.adsbygoogle || [];
+        window.adBreak = window.adConfig = function (o) { window.adsbygoogle.push(o); };
+        const sc = document.createElement("script");
+        sc.async = true;
+        sc.crossOrigin = "anonymous";
+        sc.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(cfg.client || "")}`;
+        if (cfg.test) sc.setAttribute("data-adbreak-test", "on");
+        sc.onload = () => resolve(true);
+        sc.onerror = () => resolve(false);
+        document.head.append(sc);
+        window.adConfig({ preloadAdBreaks: "on", sound: "on" });
+      });
+      return h5;
+    }
+    function showH5(name) {
+      return loadH5().then(ok => !ok ? "unavailable" : new Promise((resolve) => {
+        let viewed = false;
+        window.adBreak({
+          type: "reward", name,
+          beforeReward: (showAdFn) => showAdFn(),
+          adViewed: () => { viewed = true; },
+          adDismissed: () => {},
+          adBreakDone: (info) => resolve(viewed ? "viewed" : info?.breakStatus === "dismissed" ? "skipped" : "unavailable"),
+        });
+      }));
+    }
+
+    // 테스트 광고: 정해진 시간 동안 안내 화면, 다 보면 "보상 받기"
+    function showTest(title, seconds) {
+      return new Promise((resolve) => {
+        const claim = document.getElementById("ad-claim"), close = document.getElementById("ad-close"), count = document.getElementById("ad-count");
+        document.getElementById("ad-sub").textContent = `${title} · 끝까지 보면 보상을 받아요`;
+        let left = Math.max(1, seconds);
+        const tick = () => { count.textContent = left > 0 ? `${left}초 남음` : "다 봤어요!"; claim.disabled = left > 0; };
+        tick();
+        const timer = setInterval(() => { left--; tick(); if (left <= 0) clearInterval(timer); }, 1000);
+        const done = (r) => { clearInterval(timer); modalEl.hidden = true; claim.onclick = close.onclick = null; resolve(r); };
+        claim.onclick = () => done("viewed");
+        close.onclick = () => done("skipped");
+        modalEl.hidden = false;
+        close.focus();
+      });
+    }
+
+    // 광고 보기: 서버 티켓 → 광고 → 티켓을 돌려줌 (끝까지 안 봤거나 광고가 없으면 오류)
+    async function watch(kind, title) {
+      const t = await marketCall("ad_start", { body: { kind } });
+      const started = Date.now();
+      const r = cfg.provider === "h5" ? await showH5(kind) : await showTest(title, t.minSeconds);
+      if (r !== "viewed") throw new Error(r === "skipped" ? "광고를 끝까지 보지 않아서 보상이 없어요." : "지금은 광고를 불러올 수 없어요. 잠시 뒤 다시 시도해 주세요.");
+      // 서버는 광고를 시작하고 최소 시간이 지나야 티켓을 받아 줌
+      const wait = t.minSeconds * 1000 - (Date.now() - started) + 200;
+      if (wait > 0) await new Promise(res => setTimeout(res, wait));
+      return t.ticket;
+    }
+    return { loadStatus, setStatus, status: () => status, watch, isOpen: () => !modalEl.hidden };
+  })();
+
+  // 1층 문으로 새로 시작: 오늘 무료 입장이 남았으면 쓰고, 다 썼으면 광고를 보고 입장. 서버에 연결할 수 없으면 막지 않음
+  async function allowEntry() {
+    if (!RANKING_API) return true;
+    try {
+      const r = await marketCall("entry", { body: {} });
+      Ads.setStatus(r);
+      if (!r.unlimited) log(`오늘 1층 무료 입장 ${r.left}/${r.free}회 남음.`, "info");
+      return true;
+    } catch (e) {
+      if (e.code !== "need_ad") return true;  // 서버 오류: 게임은 계속
+    }
+    const free = Ads.status()?.free ?? 5;
+    if (!confirm(`오늘 1층 무료 입장 ${free}회를 모두 썼어요.\n광고를 보고 입장할까요?`)) return false;
+    try {
+      const ticket = await Ads.watch("entry", "던전 입장");
+      const r = await marketCall("entry", { body: { adTicket: ticket } });
+      Ads.setStatus(r);
+      log("광고를 보고 던전에 입장했다.", "info");
+      return true;
+    } catch (e) {
+      log(e.message, "bad");
+      return false;
+    }
+  }
+
   // ---- 터치 조작 ----
   // 방향 버튼: 누르면 한 칸, 누르고 있으면 0.3초 뒤부터 계속 이동. 창이 열려 있으면 움직이지 않음
-  const anyModalOpen = () => !modal.hidden || !invModal.hidden || !dexModal.hidden || !shopModal.hidden || !marketModal.hidden;
+  const anyModalOpen = () => !modal.hidden || !invModal.hidden || !dexModal.hidden || !shopModal.hidden || !marketModal.hidden || Ads.isOpen();
   const pad = document.getElementById("touch-pad");
   let holdTimer = null;
   const stopHold = () => { clearTimeout(holdTimer); clearInterval(holdTimer); holdTimer = null; };
@@ -2921,7 +3095,7 @@
   // ---- 부활 ----
   // 쓰러지면 캐시로 부활권을 사서 바로 사용 → 그 층을 처음부터(몬스터도 새로) HP 가득 찬 채로 다시 시작. 한 판에 한 번
   // 부활권을 샀는데 사용(소모)에 실패하면 Xsolla 인벤토리에 남고, 다음에 쓰러졌을 때 캐시 없이 쓸 수 있음
-  const REVIVE = { sku: "revive", cash: "cash", price: 50 };
+  const REVIVE = { sku: "revive", cash: "cash", price: 10 };  // 가격은 카탈로그에서 읽음 (이건 못 읽었을 때 기본값)
   const STORE_API = `https://store.xsolla.com/api/v2/project/${XSOLLA.publisherProjectId}`;
   const deathModal = document.getElementById("death-modal");
   const deathMsg = document.getElementById("death-msg");
@@ -2968,10 +3142,21 @@
       document.getElementById("death-restart").focus();
       return;
     }
+    // 광고로 부활 (하루 1회, 계정 없이도): 서버에서 오늘 남은 횟수를 받으면 채움. 서버가 느리거나 없어도 나머지는 바로 보임
+    const adSlot = el("div");
+    Ads.loadStatus().then(st => {
+      if (deathModal.hidden || !gameOver || player.revived || !st) return;
+      const left = st.ads?.revive ?? 0;
+      adSlot.replaceChildren(left > 0
+        ? el("button", { type: "button", className: "ad-revive", id: "revive-ad-btn", textContent: `광고 보고 부활 (오늘 ${left}회 남음)`, onclick: reviveByAd })
+        : el("p", { className: "note", textContent: "광고 부활은 오늘 다 썼어요. (하루 1회)" }));
+    });
+    const adButton = () => adSlot;
     if (!Account.configured() || !Account.loggedIn()) {
       deathRevive.replaceChildren(
-        el("p", { className: "note", textContent: `계정을 연결하면 캐시 ${revivePrice}개로 이 층을 처음부터 다시 시작할 수 있어요.` }),
-        el("button", { type: "button", className: "primary", textContent: "계정 연결", onclick: () => { closeDeath(); openLogin(); } }));
+        adButton(),
+        el("p", { className: "note", textContent: `계정을 연결하면 캐시 ${revivePrice}개로도 부활할 수 있어요.` }),
+        el("button", { type: "button", textContent: "계정 연결", onclick: () => { closeDeath(); openLogin(); } }));
       return;
     }
     deathRevive.replaceChildren(el("p", { className: "note", textContent: "부활 정보를 불러오는 중…" }));
@@ -2988,7 +3173,7 @@
     const short = !owned && balance != null && balance < revivePrice;
     const btn = el("button", { type: "button", className: "primary", id: "revive-btn", disabled: short, onclick: () => revive(owned > 0) },
       owned ? `부활권 사용 (보유 ${owned}개)` : short ? `캐시 부족 (필요 ◆ ${revivePrice})` : `캐시 ${revivePrice}개로 부활`);
-    const parts = [btn,
+    const parts = [btn, adButton(),
       el("p", { className: "note" }, "이 층을 처음부터 HP 가득 찬 채로 다시 시작해요. 몬스터도 새로 나와요. 한 판에 한 번만 쓸 수 있어요.")];
     if (balance != null) parts.push(el("p", { className: "note" }, "보유 캐시 ", el("span", { className: "cash", textContent: `◆ ${balance}` })));
     if (short) parts.push(el("a", { className: "btn", href: "shop.html", textContent: "상점에서 캐시 충전하기 (충전 후 돌아오면 부활할 수 있어요)" }));
@@ -3024,6 +3209,23 @@
     }
   }
 
+  // 광고를 보고 부활 (하루 1회): 광고 → 서버 확인 → 부활
+  async function reviveByAd() {
+    if (reviving || !gameOver || player.revived) return;
+    reviving = true;
+    setDeathMsg("광고를 불러오는 중…");
+    try {
+      const ticket = await Ads.watch("revive", "부활");
+      Ads.setStatus(await marketCall("revive_ad", { body: { adTicket: ticket } }));
+      doRevive();
+      log("광고를 보고 부활했다.", "good");
+    } catch (e) {
+      setDeathMsg(e.message, "bad");
+    } finally {
+      reviving = false;
+    }
+  }
+
   function doRevive() {
     gameOver = false;
     player.revived = true;
@@ -3047,6 +3249,7 @@
 
   // ---- 입력 ----
   window.addEventListener("keydown", (e) => {
+    if (Ads.isOpen()) return;  // 광고를 보는 중
     if (!deathModal.hidden && modal.hidden) {
       const k = e.key.toLowerCase();
       if (k === "r") { e.preventDefault(); startOver(); }

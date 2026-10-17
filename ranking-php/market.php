@@ -4,7 +4,8 @@
 //   GET  api.php?r=market       &slot=&rarity=&sort=new|cash|gold   지금 팔고 있는 아이템
 //   POST api.php?r=market_list  { item: {seed, src, lvl, v, enh, id, tries}, gold, cash, stage }  아이템 등록
 //   POST api.php?r=market_cancel { id }   내 등록 취소 → 우편함으로
-//   POST api.php?r=market_buy   { id }    구매: 캐시(가격 + 수수료)를 Xsolla에서 차감, 아이템은 내 우편함으로
+//   POST api.php?r=market_buy   { id, adTicket? }  구매: 캐시(가격 + 수수료)를 Xsolla에서 차감, 아이템은 내 우편함으로
+//                                       adTicket(광고 티켓, ads.php)이 있으면 수수료 면제 (하루 AD_CAPS['fee']회)
 //   GET  api.php?r=market_mine            내 등록, 지난 거래, 우편함
 //   POST api.php?r=mail_claim   { id }    우편 받기: 아이템 참조·골드를 돌려주고, 캐시는 Xsolla로 지급
 //   (운영자 선물은 서버에서 gift.php로 우편함에 넣음)
@@ -73,7 +74,8 @@ function market_tables(PDO $pdo): void {
         updated_at  BIGINT NOT NULL
     )');
     // 나중에 추가된 칸: 캐시를 지급한 시각(우편), 캐시를 받은 시각(구매). 다음 단계가 실패해도 다시 지급·결제하지 않게
-    foreach (['mail' => 'granted_at BIGINT', 'listings' => 'paid_at BIGINT'] as $table => $col) {
+    // fee_by: 수수료를 무엇으로 냈는지 (cash | ad)
+    foreach ([['mail', 'granted_at BIGINT'], ['listings', 'paid_at BIGINT'], ['listings', 'fee_by VARCHAR(8)']] as [$table, $col]) {
         try { $pdo->exec("ALTER TABLE {$table} ADD COLUMN {$col}"); } catch (PDOException $e) { /* 이미 있음 */ }
     }
     foreach ([
@@ -167,6 +169,7 @@ function listing_out(array $l, ?string $me): array {
         'gold' => (int)$l['price_gold'],
         'cash' => (int)$l['price_cash'],
         'fee' => (int)$l['fee_cash'],
+        'feeBy' => $l['fee_by'] ?? null,
         'state' => $l['state'],
         'createdAt' => (int)$l['created_at'],
         'expiresAt' => (int)$l['expires_at'],
@@ -301,14 +304,18 @@ function cash_grant(string $userId, int $amount, string $comment): array {
 
 function market_buy(): array {
     $who = require_user();
-    $id = (string)(read_body(512)['id'] ?? '');
+    $body = read_body(512);
+    $id = (string)($body['id'] ?? '');
     market_expire();
     $pdo = db();
     $l = q_row('SELECT * FROM listings WHERE id = ?', [$id]);
     if (!$l) throw new HttpError(409, 'gone');
-    $total = (int)$l['price_cash'] + (int)$l['fee_cash'];
     // 캐시는 이미 받았는데 기록이 안 끝난 내 구매면 결제 없이 마무리만
     $resume = $l['state'] === 'buying' && $l['buyer_key'] === $who['key'] && $l['paid_at'] !== null;
+    $ticket = null;
+    if (!$resume && !empty($body['adTicket'])) $ticket = check_ticket($who, $body['adTicket'], 'fee');  // 광고로 수수료 면제
+    $byAd = $resume ? ($l['fee_by'] === 'ad') : $ticket !== null;
+    $total = (int)$l['price_cash'] + ($byAd ? 0 : (int)$l['fee_cash']);
     if (!$resume) {
         if ($l['state'] !== 'active') throw new HttpError(409, 'gone');
         if ($l['seller_key'] === $who['key']) throw new HttpError(400, 'own');
@@ -321,17 +328,28 @@ function market_buy(): array {
             $pdo->prepare("UPDATE listings SET state = 'active', buyer_key = NULL, buyer_display = NULL, buying_at = NULL WHERE id = ? AND state = 'buying' AND paid_at IS NULL")->execute([$id]);
         };
         try {
-            $balance = cash_balance($who['token']);
-            if ($balance === null) throw new HttpError(502, 'payment_failed');
-            if ($balance < $total) throw new HttpError(402, 'not_enough_cash');
-            [$status, $text] = cash_consume($who['token'], $total);
-            if ($status < 200 || $status >= 300) {
-                error_log("[market] consume {$total} failed for listing {$id}: {$status} " . substr($text, 0, 200));
-                throw new HttpError($status === 422 ? 402 : 502, $status === 422 ? 'not_enough_cash' : 'payment_failed');
-            }
+            if ($ticket) use_ticket($ticket['id']);
         } catch (Throwable $e) { $release(); throw $e; }
+        try {
+            // 광고로 수수료를 면제받고 캐시 가격이 0이면 Xsolla를 부르지 않음
+            if ($total > 0) {
+                $balance = cash_balance($who['token']);
+                if ($balance === null) throw new HttpError(502, 'payment_failed');
+                if ($balance < $total) throw new HttpError(402, 'not_enough_cash');
+                [$status, $text] = cash_consume($who['token'], $total);
+                if ($status < 200 || $status >= 300) {
+                    error_log("[market] consume {$total} failed for listing {$id}: {$status} " . substr($text, 0, 200));
+                    throw new HttpError($status === 422 ? 402 : 502, $status === 422 ? 'not_enough_cash' : 'payment_failed');
+                }
+            }
+        } catch (Throwable $e) {
+            $release();
+            // 결제가 안 됐으면 광고 티켓은 돌려줌 (다시 광고를 보지 않아도 되게)
+            if ($ticket) $pdo->prepare('UPDATE ad_tickets SET used_at = NULL WHERE id = ?')->execute([$ticket['id']]);
+            throw $e;
+        }
         // 캐시를 받았다는 것부터 바로 기록 (아래 마무리가 실패해도 다시 결제하지 않고, 1분 뒤 자동으로 마무리됨)
-        $pdo->prepare('UPDATE listings SET paid_at = ? WHERE id = ?')->execute([now_ms(), $id]);
+        $pdo->prepare('UPDATE listings SET paid_at = ?, fee_by = ? WHERE id = ?')->execute([now_ms(), $byAd ? 'ad' : 'cash', $id]);
         $l = q_row('SELECT * FROM listings WHERE id = ?', [$id]);
     }
     try {
@@ -340,7 +358,7 @@ function market_buy(): array {
         error_log("[market] listing {$id} paid ({$total} cash) but not recorded yet (will retry): " . $e->getMessage());
         throw $e;
     }
-    return ['ok' => true, 'mail' => $mail, 'gold' => (int)$l['price_gold'], 'cash' => $total];
+    return ['ok' => true, 'mail' => $mail, 'gold' => (int)$l['price_gold'], 'cash' => $total, 'feeBy' => $byAd ? 'ad' : 'cash'];
 }
 
 // 캐시를 받은 구매를 마무리: 판매 완료 기록, 구매자에게 아이템, 판매자에게 대금. 구매자 우편 ID를 돌려줌
